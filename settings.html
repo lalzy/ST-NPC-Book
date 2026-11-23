@@ -83,7 +83,15 @@
             <label class="checkbox_label"><input type="checkbox" id="npcb_speakerportraits"> Show the speaker's portrait next to their dialogue (matched by dialogue color)</label>
             <label>Portrait size (px)<input id="npcb_speakersize" type="number" min="24" max="200" class="text_pole"></label>
             <label class="checkbox_label"><input type="checkbox" id="npcb_autoportraits"> Generate missing portraits with the Image Generation extension (only if it is active)</label>
-            <label>Portrait prompt (<code>{{name}}</code> <code>{{traits}}</code> <code>{{details}}</code>)<input id="npcb_portraitprompt" class="text_pole"></label>
+            <label>Portrait prompt mode
+                <select id="npcb_portraitmode" class="text_pole">
+                    <option value="llm">LLM writes the image prompt (instruction below goes to your LLM, its last line goes to the image generator)</option>
+                    <option value="direct">Direct (the prompt below goes straight to the image generator)</option>
+                </select></label>
+            <label>LLM instruction (<code>{{name}}</code>/<code>{{char}}</code> <code>{{traits}}</code> <code>{{details}}</code> <code>{{outfit}}</code> <code>{{posture}}</code> <code>{{state}}</code>). The NPC's data and the latest story messages are sent along with it.
+                <textarea id="npcb_portraitllm" class="text_pole textarea_compact" rows="10"></textarea></label>
+            <div class="menu_button" id="npcb_reset_portraitllm"><i class="fa-solid fa-rotate-left"></i> Reset LLM instruction</div>
+            <label>Direct image prompt (same placeholders)<input id="npcb_portraitprompt" class="text_pole"></label>
 
             <hr>
             <h4>You &amp; clothing</h4>

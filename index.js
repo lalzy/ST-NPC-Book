@@ -50,6 +50,40 @@ const DEFAULT_COLOR_RULE = `Dialogue colors:
 - In your reply (outside the <npcs> block), wrap every line of spoken dialogue in <font color=HEX>"..."</font> using the speaking character's Dialogue color from the scene, e.g. <font color=#e6a0c4>"Hello there."</font>
 - Use the exact color listed for that character. Characters without a Dialogue color get no font tag.`;
 
+const DEFAULT_PORTRAIT_LLM_PROMPT = `Describe {{name}} for an image generator. Use the template below.
+
+STEP 1 – Fill every field in your reasoning.
+Source for each field: the CHARACTER DATA and LATEST STORY MESSAGES provided below only.
+If a field is not stated in the sources, write NONE. Never guess.
+
+TEMPLATE
+GENDER_TAG: 1girl or 1boy
+SPECIES: e.g. human, elf
+AGE: number + "years old"
+HEIGHT: short / average height / tall
+FIGURE: 1 to 2 of: slender, petite, athletic, curvy, hourglass, heavy, wide hips, narrow waist
+BUST: small bust / medium bust / large bust (female only)
+SKIN: color + "skin"
+HAIR: length + color + "hair"
+HAIRSTYLE: e.g. ponytail, loose, bun
+EYES: color + "eyes"
+CLOTHING: every item worn right now, each as color + material + item. If nude, write "nude".
+ACCESSORIES: glasses, jewelry, hats etc. worn right now
+EXPRESSION: one word
+POSE: standing / sitting / leaning / kneeling / lying down
+SETTING: 1 to 3 words
+
+STEP 2 – Check every field.
+- Is it stated in the sources? If not, change it to NONE.
+- Does it follow the field's format? If not, fix it.
+- Is it a literal visual word? No metaphors, no names, no personality, no actions.
+
+STEP 3 – Output.
+Join the fields in template order with ", ".
+Remove every NONE field.
+Start the line with "solo, upper body, portrait, close-up, ".
+Output only that line.`;
+
 const COLOR_PALETTE = ['#e6a0c4', '#8ecae6', '#f4a261', '#90be6d', '#c77dff', '#ffd166', '#ef476f', '#06d6a0', '#a0c4ff', '#ffadad', '#bdb2ff', '#caffbf', '#f28482', '#84a59d', '#e9c46a', '#9bf6ff'];
 const HEX_RE = /^#[0-9a-f]{6}$/i;
 
@@ -83,6 +117,8 @@ const DEFAULTS = {
     speakerPortraitSize: 56,
     autoPortraits: true,
     portraitPrompt: 'portrait of {{name}}, head and shoulders, {{traits}}, {{details}}',
+    portraitMode: 'llm',
+    portraitLlmPrompt: DEFAULT_PORTRAIT_LLM_PROMPT,
     dialogueColors: true,
     colorRule: DEFAULT_COLOR_RULE,
     trackOutfits: true,
@@ -636,24 +672,95 @@ function imageGenAvailable() {
     return !!c.SlashCommandParser?.commands?.imagine;
 }
 
-function portraitPromptFor(t) {
+function cleanForImagine(x) {
+    return String(x ?? '').replace(/[|{}"\n\r]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** Data about an NPC for portrait prompts: details, identity, what they wear right now, posture/state. */
+function portraitData(t) {
     const s = settings();
-    const clean = (x) => String(x ?? '').replace(/[|{}"\n\r]+/g, ' ').replace(/\s+/g, ' ').trim();
-    return clean(String(s.portraitPrompt || '')
-        .replaceAll('{{name}}', t.name)
-        .replaceAll('{{traits}}', traitSummary(t))
-        .replaceAll('{{details}}', String(t.details || '').slice(0, 400)));
+    const inst = hasChat() ? currentRoster().find(i => i.id === t.id) : null;
+    const outfit = inst?.outfit ?? outfitFromDefault(t.defaultWorn, t.wardrobe || [], s.conditions);
+    const wearing = (outfit || []).map(w => {
+        const it = findItem(t.wardrobe || [], w.id);
+        if (!it) return null;
+        return `${it.name}${w.condition && w.condition !== s.conditions[0] ? ` (${w.condition})` : ''}`;
+    }).filter(Boolean).join(', ');
+    return {
+        name: t.name,
+        traits: traitSummary(t),
+        details: String(t.details || '').trim(),
+        outfit: wearing || (t.wardrobe?.length ? 'nothing' : ''),
+        posture: inst?.posture || '',
+        state: inst?.state || '',
+    };
+}
+
+function fillPortraitTemplate(tpl, d) {
+    return String(tpl || '')
+        .replaceAll('{{name}}', d.name)
+        .replaceAll('{{char}}', d.name)
+        .replaceAll('{{traits}}', d.traits)
+        .replaceAll('{{details}}', d.details)
+        .replaceAll('{{outfit}}', d.outfit)
+        .replaceAll('{{posture}}', d.posture)
+        .replaceAll('{{state}}', d.state);
+}
+
+function recentStory(n = 4, max = 2500) {
+    const chat = ctx().chat || [];
+    const out = [];
+    for (let i = chat.length - 1; i >= 0 && out.length < n; i--) {
+        const m = chat[i];
+        if (!m || m.is_system) continue;
+        out.unshift(`${m.name}: ${String(m.mes || '').replace(/<[^>]+>/g, '')}`);
+    }
+    const txt = out.join('\n\n');
+    return txt.length > max ? txt.slice(txt.length - max) : txt;
+}
+
+/** Turn the LLM's answer into a single tag line (drop reasoning, quotes, labels). */
+function extractTagLine(text) {
+    let t = String(text ?? '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```[a-z]*|```/gi, '');
+    const lines = t.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const tagged = lines.filter(l => /^(solo|1girl|1boy|portrait)\b/i.test(l.replace(/^["'*\s]+/, '')));
+    let line = (tagged.length ? tagged[tagged.length - 1] : lines[lines.length - 1]) || '';
+    line = line.replace(/^(output|final|prompt|answer)\s*:\s*/i, '').replace(/^["'`*]+|["'`*]+$/g, '').trim();
+    return line;
+}
+
+async function portraitPromptFor(t) {
+    const s = settings();
+    const d = portraitData(t);
+    if (s.portraitMode !== 'llm') return cleanForImagine(fillPortraitTemplate(s.portraitPrompt, { ...d, details: d.details.slice(0, 400) }));
+    const system = fillPortraitTemplate(s.portraitLlmPrompt, d);
+    const data = [
+        'CHARACTER DATA',
+        `Name: ${d.name}`,
+        d.traits && `Identity: ${d.traits}`,
+        d.details && `Description: ${d.details}`,
+        d.outfit && `Wearing right now: ${d.outfit}`,
+        d.posture && `Posture: ${d.posture}`,
+        d.state && `State: ${d.state}`,
+        '',
+        'LATEST STORY MESSAGES',
+        recentStory() || '(none)',
+    ].filter(x => typeof x === 'string').join('\n');
+    const answer = await ctx().generateRaw({ systemPrompt: system, prompt: `${data}\n\nFollow the instructions and output only the final line.` });
+    const line = cleanForImagine(extractTagLine(answer));
+    console.debug('[NPC Book] portrait prompt for', t.id, '→', line);
+    return line;
 }
 
 /** Queue an image-generation run for an NPC without a portrait (only if the Image Generation extension is active). */
 function ensurePortrait(id, { force = false } = {}) {
     const s = settings();
     const t = lib()[id];
-    if (!t || t.portrait) return;
+    if (!t || (t.portrait && !force)) return;
     if (!force && (!s.autoPortraits || portraitTried.has(id))) return;
     if (!imageGenAvailable()) { if (force) toastr.warning('Image Generation extension is not active.', 'NPC Book'); return; }
     portraitTried.add(id);
-    if (!portraitQueue.includes(id)) portraitQueue.push(id);
+    if (!portraitQueue.some(q => q.id === id)) portraitQueue.push({ id, force });
     runPortraitQueue();
 }
 
@@ -662,11 +769,12 @@ async function runPortraitQueue() {
     portraitBusy = true;
     try {
         while (portraitQueue.length) {
-            const id = portraitQueue.shift();
+            const { id, force } = portraitQueue.shift();
             const t = lib()[id];
-            if (!t || t.portrait) continue;
+            if (!t || (t.portrait && !force)) continue;
             try {
-                const prompt = portraitPromptFor(t);
+                const prompt = await portraitPromptFor(t);
+                if (!prompt) { toastr.warning(`Could not build a portrait prompt for ${t.name}.`, 'NPC Book'); continue; }
                 const res = await ctx().executeSlashCommandsWithOptions(`/imagine quiet=true gallery=false extend=false edit=false "${prompt}"`, { handleParserErrors: false, handleExecutionErrors: false });
                 const url = String(res?.pipe ?? '').trim();
                 if (url && lib()[id]) {
@@ -679,6 +787,7 @@ async function runPortraitQueue() {
                 }
             } catch (e) {
                 console.warn('[NPC Book] portrait generation failed', e);
+                if (force) toastr.error(`Portrait generation failed: ${e?.message || e}`, 'NPC Book');
             }
         }
     } finally {
@@ -1273,7 +1382,6 @@ function selectTemplate(id, isNew = false, tab = 'card') {
         } catch (err) { toastr.error('Could not read image.', 'NPC Book'); }
     });
     ed.on('click.npcb', '.npcb-ed-genimg', () => {
-        if (lib()[t.id]?.portrait) { toastr.info('Clear the current portrait first (trash button), then Save.', 'NPC Book'); return; }
         toastr.info(`Generating a portrait for ${t.name}…`, 'NPC Book');
         ensurePortrait(t.id, { force: true });
     });
@@ -1477,6 +1585,9 @@ async function mountSettings() {
     bind('#npcb_speakersize', 'speakerPortraitSize', 'number');
     bind('#npcb_autoportraits', 'autoPortraits', 'checkbox');
     bind('#npcb_portraitprompt', 'portraitPrompt');
+    bind('#npcb_portraitmode', 'portraitMode');
+    bind('#npcb_portraitllm', 'portraitLlmPrompt');
+    root.find('#npcb_reset_portraitllm').on('click', () => { s.portraitLlmPrompt = DEFAULT_PORTRAIT_LLM_PROMPT; root.find('#npcb_portraitllm').val(s.portraitLlmPrompt); save(); });
     root.find('#npcb_speakerportraits, #npcb_speakersize').on('input change', () => decorateAll());
     bind('#npcb_colorrule', 'colorRule');
     root.find('#npcb_reset_color').on('click', () => { s.colorRule = DEFAULT_COLOR_RULE; root.find('#npcb_colorrule').val(s.colorRule); save(); });
