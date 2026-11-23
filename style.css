@@ -87,8 +87,9 @@
     display: grid; gap: 4px;
     grid-template-columns: 1fr 1fr;
     grid-template-areas:
-        "head head"
-        "neck neck"
+        "head hair"
+        "face glasses"
+        "neck piercings"
         "cover cover"
         "upper_outer upper_inner"
         "hands waist"
@@ -151,12 +152,13 @@
 .npcb-wdx-dollshow { display: none; }
 .npcb-doll-collapsed .npcb-wdx-doll { display: none; }
 .npcb-doll-collapsed .npcb-wdx-dollshow { display: inline-block; }
-.npcb-wdx-grid { display: grid; gap: 4px; grid-template-columns: 1fr 1fr; grid-template-areas: "head head" "neck neck" "cover cover" "upper_outer upper_inner" "hands waist" "lower_outer lower_inner" "feet_outer feet_inner" "other other"; }
+.npcb-wdx-grid { display: grid; gap: 4px; grid-template-columns: 1fr 1fr; grid-template-areas: "head hair" "face glasses" "neck piercings" "cover cover" "upper_outer upper_inner" "hands waist" "lower_outer lower_inner" "feet_outer feet_inner" "other other"; }
 .npcb-wdx-cell { border: 1px solid var(--SmartThemeBorderColor); border-radius: 7px; padding: 3px 6px; background: rgba(0, 0, 0, .15); min-height: 34px; font-size: .8em; cursor: pointer; min-width: 0; }
 .npcb-wdx-cell.filled { background: rgba(255, 255, 255, .06); }
 .npcb-wdx-cell.sel { outline: 2px solid var(--SmartThemeQuoteColor, #6a6); }
 .npcb-wdx-cl { display: flex; justify-content: space-between; font-size: .78em; text-transform: uppercase; letter-spacing: .03em; opacity: .55; }
 .npcb-wdx-cw { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.npcb-wdx-cell.stack .npcb-wdx-cw { white-space: normal; }
 .npcb-wdx-list { flex: 1; min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--SmartThemeBorderColor); border-radius: 8px; overflow: hidden; }
 .npcb-wdx-tb { display: flex; gap: 6px; align-items: center; padding: 6px; border-bottom: 1px solid var(--SmartThemeBorderColor); }
 .npcb-wdx-tb .text_pole { margin: 0; }
@@ -183,7 +185,7 @@
 .npcb-wdx-edmain label { display: flex; flex-direction: column; gap: 2px; font-size: .85em; }
 .npcb-wdx-edmain .text_pole { margin: 0; }
 .npcb-wdx-sec { font-size: .72em; text-transform: uppercase; letter-spacing: .05em; opacity: .6; margin-bottom: 3px; }
-.npcb-wdx-mini { display: grid; gap: 3px; width: 190px; grid-template-columns: 1fr 1fr; grid-template-areas: "head head" "neck neck" "cover cover" "upper_outer upper_inner" "hands waist" "lower_outer lower_inner" "feet_outer feet_inner" "other other"; }
+.npcb-wdx-mini { display: grid; gap: 3px; width: 190px; grid-template-columns: 1fr 1fr; grid-template-areas: "head hair" "face glasses" "neck piercings" "cover cover" "upper_outer upper_inner" "hands waist" "lower_outer lower_inner" "feet_outer feet_inner" "other other"; }
 .npcb-wdx-mc { font-size: .7em; padding: 2px 5px; border-radius: 5px; border: 1px solid var(--SmartThemeBorderColor); opacity: .5; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .npcb-wdx-mc.on { opacity: 1; background: var(--SmartThemeQuoteColor, #6a6); color: #000; border-color: transparent; }
 .npcb-wdx-bulk { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-top: 1px solid var(--SmartThemeQuoteColor, #6a6); background: rgba(127, 179, 138, .12); font-size: .9em; }

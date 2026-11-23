@@ -299,7 +299,11 @@ export function applyTracker(list, prevRoster, { library, threshold, numericTole
 
 export const SLOTS = [
     { key: 'head', label: 'Head' },
+    { key: 'hair', label: 'Hair' },
+    { key: 'face', label: 'Face' },
+    { key: 'glasses', label: 'Glasses' },
     { key: 'neck', label: 'Neck' },
+    { key: 'piercings', label: 'Piercings' },
     { key: 'cover', label: 'Cover' },
     { key: 'upper_outer', label: 'Upper (outer)' },
     { key: 'upper_inner', label: 'Upper (inner)' },
@@ -311,11 +315,16 @@ export const SLOTS = [
     { key: 'feet_inner', label: 'Feet (inner)' },
     { key: 'other', label: 'Other' },
 ];
-export const STACKING_SLOTS = new Set(['other']);
+/** Slots that hold a list: putting something on there never takes anything else off. */
+export const STACKING_SLOTS = new Set(['piercings', 'other']);
 const SLOT_KEYS = new Set(SLOTS.map(s => s.key));
 
 const SLOT_ALIASES_EXTRA = {
-    cap: 'head', crown: 'head', tiara: 'head', circlet: 'head', helm: 'head', bandana: 'head', beret: 'head', headband: 'head', veil: 'head',
+    cap: 'head', crown: 'head', tiara: 'head', circlet: 'head', helm: 'head', bandana: 'head', beret: 'head', headband: 'head',
+    hairtie: 'hair', scrunchie: 'hair', ribbon: 'hair', hairpin: 'hair', hairclip: 'hair', barrette: 'hair', hairnet: 'hair', comb: 'hair', bow: 'hair',
+    mask: 'face', veil: 'face', eyepatch: 'face', blindfold: 'face', makeup: 'face', lipstick: 'face', facepaint: 'face', muzzle: 'face', gag: 'face',
+    sunglasses: 'glasses', goggles: 'glasses', monocle: 'glasses', eyeglasses: 'glasses',
+    stud: 'piercings', nosering: 'piercings',
     choker: 'neck', pendant: 'neck', amulet: 'neck', neckerchief: 'neck', tie: 'neck',
     robe: 'cover', bathrobe: 'cover', poncho: 'cover', parka: 'cover', overcoat: 'cover', blazer: 'cover', cardigan: 'cover', breastplate: 'cover', cuirass: 'cover', mantle: 'cover', shawl: 'cover',
     tunic: 'upper_outer', blouse: 'upper_outer', sweater: 'upper_outer', jumper: 'upper_outer', vest: 'upper_outer', tee: 'upper_outer', tshirt: 'upper_outer', hoodie: 'upper_outer', corset: 'upper_outer', doublet: 'upper_outer', jerkin: 'upper_outer', apron: 'upper_outer', camisole: 'upper_inner', chemise: 'upper_inner', bralette: 'upper_inner', binder: 'upper_inner',
@@ -325,10 +334,11 @@ const SLOT_ALIASES_EXTRA = {
     pantie: 'lower_inner', panty: 'lower_inner', knickers: 'lower_inner', boxers: 'lower_inner', boxer: 'lower_inner', thong: 'lower_inner', loincloth: 'lower_inner', undergarment: 'lower_inner', smallclothes: 'lower_inner',
     shoe: 'feet_outer', boot: 'feet_outer', sandal: 'feet_outer', slipper: 'feet_outer', heel: 'feet_outer', heels: 'feet_outer', sneaker: 'feet_outer', loafer: 'feet_outer', clog: 'feet_outer', moccasin: 'feet_outer', sabaton: 'feet_outer',
     sock: 'feet_inner', stocking: 'feet_inner', tights: 'feet_inner', pantyhose: 'feet_inner', footwrap: 'feet_inner',
-    earring: 'other', bracelet: 'other', piercing: 'other', brooch: 'other', glasses: 'other', spectacles: 'other', anklet: 'other',
+    earring: 'piercings', earrings: 'piercings', piercing: 'piercings', piercings: 'piercings',
+    bracelet: 'other', brooch: 'other', anklet: 'other',
 };
 const SLOT_ALIASES = {
-    hat: 'head', helmet: 'head', hood: 'head', hair: 'head',
+    hat: 'head', helmet: 'head', hood: 'head', hair: 'hair', face: 'face', glasses: 'glasses', spectacles: 'glasses',
     collar: 'neck', scarf: 'neck', necklace: 'neck',
     cloak: 'cover', coat: 'cover', jacket: 'cover', armor: 'cover', armour: 'cover', outerwear: 'cover', cape: 'cover',
     upper: 'upper_outer', top: 'upper_outer', torso: 'upper_outer', chest: 'upper_outer', shirt: 'upper_outer', upper_outer: 'upper_outer',
@@ -364,7 +374,10 @@ export function normalizeSlots(list) {
 }
 
 export function inferSlots(name) {
-    for (const w of normalize(name).split(' ').reverse()) {
+    const n = normalize(name);
+    if (/\b(piercing|earrings?|ear cuff|(nose|lip|belly|navel|eyebrow|tongue|nipple|septum) (ring|stud|bar|piercing))s?\b/.test(n)) return ['piercings'];
+    if (/\b(hair (tie|band|clip|pin|ribbon|ornament|stick)s?)\b/.test(n)) return ['hair'];
+    for (const w of n.split(' ').reverse()) {
         const k = SLOT_ALIASES[w] || SLOT_ALIASES[w.replace(/s$/, '')];
         if (k) return [k];
     }

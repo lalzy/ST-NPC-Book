@@ -5,7 +5,7 @@ import {
     extractTracker, applyTracker, uniqueId, slugify, ID_PATTERN, normalize, pickEnum, parseLenientJson, normalizeSlots,
     extractCharacterList, resolveRef, normColor, exposureSummary, applyCastOverrides,
     defaultPronouns, PROFILE_FIELDS,
-    SLOTS, applyOutfitChange, outfitFromDefault, outfitBySlot, wearItem, findItem, normOutfitChange, inferSlots,
+    SLOTS, STACKING_SLOTS, applyOutfitChange, outfitFromDefault, outfitBySlot, wearItem, findItem, normOutfitChange, inferSlots,
 } from './logic.js';
 import { promptManager } from '../../../openai.js';
 import { user_avatar, getUserAvatar } from '../../../personas.js';
@@ -1410,7 +1410,7 @@ function mountPaperdoll(host, getOutfit, setOutfit, getWardrobe, onEditWardrobe)
 
 const wardrobeUi = new Map(); // per owner (NPC id / persona key), this session: { open: Set<slot> } of unfolded groups
 const GROUP_FOLD = 5;
-const SLOT_SHORT = { head: 'Head', neck: 'Neck', cover: 'Cover', upper_outer: 'Upper', upper_inner: 'Upper inner', hands: 'Hands', waist: 'Waist', lower_outer: 'Lower', lower_inner: 'Lower inner', feet_outer: 'Feet', feet_inner: 'Feet inner', other: 'Other' };
+const SLOT_SHORT = { head: 'Head', hair: 'Hair', face: 'Face', glasses: 'Glasses', piercings: 'Piercings', neck: 'Neck', cover: 'Cover', upper_outer: 'Upper', upper_inner: 'Upper inner', hands: 'Hands', waist: 'Waist', lower_outer: 'Lower', lower_inner: 'Lower inner', feet_outer: 'Feet', feet_inner: 'Feet inner', other: 'Other' };
 const slotIndex = (k) => SLOTS.findIndex(x => x.key === k);
 const primarySlot = (item) => [...(item.slots || [])].sort((a, b) => slotIndex(a) - slotIndex(b))[0] || 'other';
 
@@ -1428,7 +1428,7 @@ function mountWardrobe(host, data, { key = '', onChange } = {}) {
         <div class="npcb-wdx-doll">
             <div class="npcb-wdx-dollhead"><span>Starting outfit</span><i class="fa-solid fa-angles-left npcb-wdx-dolltoggle" title="Hide starting outfit"></i></div>
             <div class="npcb-wdx-grid"></div>
-            <small class="npcb-dim">★ in the list = worn at the start. Click a slot to filter the list.</small>
+            <small class="npcb-dim npcb-wdx-hint"></small>
         </div>
         <div class="npcb-wdx-list">
             <div class="npcb-wdx-tb">
@@ -1463,7 +1463,7 @@ function mountWardrobe(host, data, { key = '', onChange } = {}) {
         root.find('.npcb-wdx-grid').html(SLOTS.map((x) => {
             const n = data.wardrobe.filter(i => i.slots.includes(x.key)).length;
             const worn = by[x.key].map(w => esc(w.item.name)).join(', ');
-            return `<div class="npcb-wdx-cell ${st.slot === x.key ? 'sel' : ''} ${worn ? 'filled' : ''}" data-slot="${x.key}" style="grid-area:${x.key}">
+            return `<div class="npcb-wdx-cell ${st.slot === x.key ? 'sel' : ''} ${worn ? 'filled' : ''} ${STACKING_SLOTS.has(x.key) ? 'stack' : ''}" data-slot="${x.key}" style="grid-area:${x.key}">
                 <div class="npcb-wdx-cl"><span>${esc(x.label)}</span><span>${n || ''}</span></div>
                 <div class="npcb-wdx-cw">${worn || '<span class="npcb-dim">—</span>'}</div></div>`;
         }).join(''));
@@ -1515,6 +1515,9 @@ function mountWardrobe(host, data, { key = '', onChange } = {}) {
             <div class="menu_button redWarningBG npcb-wdx-bulkdel"><i class="fa-solid fa-trash-can"></i></div>
             <div class="menu_button npcb-wdx-bulkclear" title="Clear selection"><i class="fa-solid fa-xmark"></i></div>` : '');
         root.find('.npcb-wdx-newslot').text(`slot: ${st.slot ? SLOT_LABEL[st.slot] : 'auto'}`);
+        root.find('.npcb-wdx-hint').html(st.slot
+            ? `<b>${esc(SLOT_LABEL[st.slot])}</b>: click an item to put it on or take it off${STACKING_SLOTS.has(st.slot) ? ' (this slot holds several)' : ''}. ⋯ edits it. Click the slot again to clear.`
+            : '★ in the list = worn at the start. Click a slot to dress it.');
     };
     const draw = () => { drawDoll(); drawRows(); };
     const itemOf = (el) => byId($(el).closest('[data-item]').data('item'));
@@ -1543,6 +1546,11 @@ function mountWardrobe(host, data, { key = '', onChange } = {}) {
     host.on('click.wdx', '.npcb-wdx-row', (e) => {
         if ($(e.target).is('.npcb-wdx-pick, .npcb-wdx-star')) return;
         const id = $(e.currentTarget).data('item');
+        if (st.slot && !$(e.target).is('.npcb-wdx-dots')) {
+            setStar(id, !isStar(id));
+            draw(); changed();
+            return;
+        }
         st.expanded = st.expanded === id ? null : id;
         drawRows();
     });
@@ -2212,7 +2220,7 @@ const ASSIST_FIELDS = [
 const ASSIST_TEXTAREA = new Set(['description', 'details']);
 
 const assist = {
-    open: false, busy: false, owner: null,
+    open: false, busy: false, owner: null, run: null,
     card: { fields: null, useCard: true, useChat: false, prompt: '', result: null, accept: new Set() },
     wardrobe: { count: 8, mode: 'add', cover: true, start: false, prompt: '', result: null },
 };
@@ -2276,7 +2284,9 @@ function assistFoot(st, applyLabel, note) {
     return `<div class="npcb-assist-foot">
         <textarea class="text_pole npcb-as-prompt" rows="3" placeholder="Describe what you want…">${esc(st.prompt)}</textarea>
         <div class="npcb-row">
-            <div class="menu_button npcb-as-gen ${assist.busy ? 'disabled' : ''}"><i class="fa-solid ${assist.busy ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'}"></i> ${assist.busy ? 'Generating…' : 'Generate'}</div>
+            ${assist.busy
+                ? '<div class="menu_button npcb-as-stop" title="Stop generating"><i class="fa-solid fa-stop"></i> Stop</div>'
+                : '<div class="menu_button npcb-as-gen"><i class="fa-solid fa-wand-magic-sparkles"></i> Generate</div>'}
             <div class="menu_button npcb-as-refine ${assist.busy || !st.result ? 'disabled' : ''}" title="Change the last answer according to your prompt"><i class="fa-solid fa-rotate"></i> Refine</div>
             <span class="npcb-spacer"></span>
             ${applyLabel ? `<div class="menu_button npcb-as-apply ${assist.busy ? 'disabled' : ''}">${esc(applyLabel)}</div>` : ''}
@@ -2363,21 +2373,36 @@ async function runAssist(refine) {
     const st = assist[mode];
     if (refine && (!st.result || !st.prompt.trim())) { toastr.info('Write what to change in the prompt box, then press Refine.', 'NPC Book'); return; }
     const owner = assist.owner;
+    const run = {};
+    assist.run = run;
     assist.busy = true;
     renderAssist();
     try {
         const { systemPrompt, prompt } = mode === 'card' ? buildCardAssist(refine) : buildWardrobeAssist(refine);
         const answer = await ctx().generateRaw({ systemPrompt, prompt });
-        if (assist.owner !== owner) return; // switched NPC meanwhile
+        if (assist.run !== run || assist.owner !== owner) return; // stopped, or switched NPC meanwhile
         const json = assistJson(answer);
         if (mode === 'card') readCardAnswer(json); else readWardrobeAnswer(json);
     } catch (e) {
+        if (assist.run !== run) return; // stopped by the user
         console.warn('[NPC Book] assist failed', e);
         toastr.error(`Assist failed: ${e?.message || e}`, 'NPC Book');
     } finally {
-        assist.busy = false;
-        renderAssist();
+        if (assist.run === run) {
+            assist.run = null;
+            assist.busy = false;
+            renderAssist();
+        }
     }
+}
+
+function stopAssist() {
+    if (!assist.busy) return;
+    assist.run = null;
+    assist.busy = false;
+    try { ctx().stopGeneration?.(); } catch (e) { console.warn('[NPC Book] stop failed', e); }
+    renderAssist();
+    toastr.info('Assist stopped.', 'NPC Book');
 }
 
 function buildCardAssist(refine) {
@@ -2533,6 +2558,7 @@ function bindAssist(modal) {
     panel.on('input', '.npcb-as-prompt', (e) => { assist[editorTab() === 'wardrobe' ? 'wardrobe' : 'card'].prompt = String(e.target.value); });
     panel.on('keydown', '.npcb-as-prompt', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runAssist(false); } });
     panel.on('click', '.npcb-as-gen', () => runAssist(false));
+    panel.on('click', '.npcb-as-stop', stopAssist);
     panel.on('click', '.npcb-as-refine', () => runAssist(true));
     panel.on('click', '.npcb-as-apply', () => { if (assist.busy) return; if (editorTab() === 'wardrobe') applyWardrobeAssist(); else applyCardAssist(); renderAssist(); });
     // card proposals
