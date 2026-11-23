@@ -228,3 +228,15 @@
     .npcb-modal-body { position: relative; }
     .npcb-assist { position: absolute; inset: 0; width: auto; z-index: 2; background: var(--SmartThemeBlurTintColor); border-left: none; }
 }
+
+/* library folders */
+.npcb-lib-folder { display: flex; align-items: center; gap: 6px; padding: 5px 6px; border-radius: 8px; cursor: pointer; font-size: .92em; user-select: none; }
+.npcb-lib-folder:hover { background: rgba(255, 255, 255, .06); }
+.npcb-lib-folder .fa-folder, .npcb-lib-folder .fa-folder-open { opacity: .75; }
+.npcb-lib-fchev { width: 10px; font-size: .7em; opacity: .55; }
+.npcb-lib-fname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.npcb-lib-fmenu { opacity: 0; padding: 2px 4px; }
+.npcb-lib-folder:hover .npcb-lib-fmenu { opacity: .7; }
+@media (hover: none) { .npcb-lib-fmenu { opacity: .6; } }
+.npcb-lib-folder.npcb-drop, .npcb-lib-list.npcb-drop { outline: 2px dashed var(--SmartThemeQuoteColor, #6a6); outline-offset: -2px; background: rgba(127, 179, 138, .12); }
+.npcb-menu-danger { color: #e88; }

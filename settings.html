@@ -81,6 +81,7 @@
             <h4>Matching &amp; creation</h4>
             <small>An NPC reported by the LLM is the same as a saved one only when (1) its ID or Name matches exactly, and (2) its identity data matches at least the threshold below. Otherwise a new NPC card is created.</small>
             <label class="checkbox_label"><input type="checkbox" id="npcb_autocreate"> Create a new NPC card when no match is found</label>
+            <label>Folder for NPCs the AI creates <small>(empty = top level; use / for subfolders)</small><input id="npcb_autofolder" class="text_pole" placeholder="e.g. New from chat"></label>
             <label>Data match threshold: <span id="npcb_threshold_val"></span>
                 <input id="npcb_threshold" type="range" min="0" max="100" step="5"></label>
             <label>Numeric tolerance (e.g. age ± years)<input id="npcb_tolerance" type="number" min="0" max="100" class="text_pole"></label>

@@ -184,6 +184,9 @@ const DEFAULTS = {
     includeWardrobe: true,
     allowWardrobeGrowth: false,
     wardrobeDollCollapsed: false,
+    folders: [],
+    folderCollapsed: [],
+    autoFolder: '',
     assistCardPrompt: DEFAULT_ASSIST_CARD_PROMPT,
     assistWardrobePrompt: DEFAULT_ASSIST_WARDROBE_PROMPT,
     outfitRules: DEFAULT_OUTFIT_RULES,
@@ -776,6 +779,8 @@ async function processLastMessage() {
                 });
                 for (const t of r.created) {
                     t.color = t.color || pickColor();
+                    t.folder = normFolder(s.autoFolder);
+                    registerFolder(t.folder);
                     const entry = ex.json.find(e => e && normalize(e.name) === normalize(t.name));
                     for (const ext of extensions.values()) {
                         if (typeof ext.fromTracker !== 'function' || !entry) continue;
@@ -1275,11 +1280,11 @@ function openAddPicker(anchor) {
         const nq = normalize(q);
         const items = Object.values(lib())
             .filter(t => !present.has(t.id))
-            .filter(t => !nq || normalize(`${t.name} ${t.id} ${t.description}`).includes(nq))
+            .filter(t => !nq || normalize(`${t.name} ${t.id} ${t.description} ${t.folder || ''}`).includes(nq))
             .sort((a, b) => a.name.localeCompare(b.name));
         pop.find('.npcb-picker-list').html(items.length ? items.map(t => `
             <div class="npcb-picker-item" data-id="${esc(t.id)}">${avatarHtml(t, t.name, 'npcb-ava-sm')}
-                <div><div>${esc(t.name)} <small class="npcb-dim">${esc(t.id)}</small></div><small class="npcb-dim">${esc(traitSummary(t) || t.description || '')}</small></div>
+                <div><div>${esc(t.name)} <small class="npcb-dim">${esc(t.folder ? `${t.folder} · ${t.id}` : t.id)}</small></div><small class="npcb-dim">${esc(traitSummary(t) || t.description || '')}</small></div>
             </div>`).join('') : '<div class="npcb-empty">No matching NPCs.</div>');
     };
     draw('');
@@ -1760,6 +1765,7 @@ let libIsNew = false;
 let libDraftPortrait = null;
 let libDraftWardrobe = null;
 let libWardrobeUi = null;
+let libNewFolder = '';
 let libDraftExt = {};
 
 function ensureTopButton() {
@@ -1788,6 +1794,7 @@ function ensureLibraryModal() {
           <div class="npcb-lib-side">
             <div class="npcb-row">
               <input type="search" class="text_pole npcb-lib-search" placeholder="Search…">
+              <div class="menu_button npcb-lib-newfolder" title="New folder"><i class="fa-solid fa-folder-plus"></i></div>
               <div class="menu_button npcb-lib-new" title="New NPC"><i class="fa-solid fa-plus"></i></div>
             </div>
             <div class="npcb-lib-list"></div>
@@ -1800,7 +1807,38 @@ function ensureLibraryModal() {
     $('body').append(modal);
     modal.on('click', (e) => { if (e.target === modal[0]) closeLibrary(); });
     modal.on('click', '.npcb-lib-close', closeLibrary);
-    modal.on('click', '.npcb-lib-new', () => selectTemplate(null, true));
+    modal.on('click', '.npcb-lib-new', () => { libNewFolder = (libSelected && lib()[libSelected]?.folder) || ''; selectTemplate(null, true); });
+    modal.on('click', '.npcb-lib-newfolder', async () => {
+        const name = await askFolderName('New folder (use / for subfolders, e.g. <i>Eldoria/Village</i>):');
+        if (!name) return;
+        registerFolder(name);
+        save(); renderLibraryList();
+    });
+    modal.on('click', '.npcb-lib-folder', (e) => {
+        const path = String($(e.currentTarget).data('path'));
+        if ($(e.target).is('.npcb-lib-fmenu')) { e.stopPropagation(); openFolderMenu(e.target, path); return; }
+        const s = settings();
+        s.folderCollapsed = s.folderCollapsed.includes(path) ? s.folderCollapsed.filter(f => f !== path) : [...s.folderCollapsed, path];
+        save(); renderLibraryList();
+    });
+    // drag an NPC onto a folder (or onto empty list space for the top level)
+    modal.on('dragstart', '.npcb-lib-item', (e) => { e.originalEvent.dataTransfer.setData('text/x-npcb-id', String($(e.currentTarget).data('id'))); e.originalEvent.dataTransfer.effectAllowed = 'move'; });
+    modal.on('dragover', '.npcb-lib-folder, .npcb-lib-list', (e) => {
+        if (![...(e.originalEvent.dataTransfer?.types || [])].includes('text/x-npcb-id')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        modal.find('.npcb-drop').removeClass('npcb-drop');
+        $(e.currentTarget).addClass('npcb-drop');
+    });
+    modal.on('dragleave drop', '.npcb-lib-folder, .npcb-lib-list', (e) => { $(e.currentTarget).removeClass('npcb-drop'); });
+    modal.on('drop', '.npcb-lib-folder, .npcb-lib-list', (e) => {
+        const id = e.originalEvent.dataTransfer?.getData('text/x-npcb-id');
+        if (!id) return;
+        e.preventDefault();
+        e.stopPropagation();
+        modal.find('.npcb-drop').removeClass('npcb-drop');
+        moveNpcToFolder(id, $(e.currentTarget).is('.npcb-lib-folder') ? String($(e.currentTarget).data('path')) : '');
+    });
     modal.on('input', '.npcb-lib-search', renderLibraryList);
     modal.on('click', '.npcb-lib-item', (e) => selectTemplate($(e.currentTarget).data('id')));
     modal.on('click', '.npcb-lib-export', exportLibrary);
@@ -1819,20 +1857,146 @@ function openLibrary(id = null, isNew = false, tab = 'card') {
 
 function closeLibrary() { $('#npcb_library').hide(); }
 
+// ── folders ──
+/** "  Eldoria / Village/ " → "Eldoria/Village" ('' = no folder). */
+function normFolder(path) {
+    return String(path ?? '').split('/').map(x => x.trim()).filter(Boolean).join('/');
+}
+const folderParent = (path) => path.split('/').slice(0, -1).join('/');
+const inFolder = (folder, path) => folder === path || folder.startsWith(`${path}/`);
+
+/** Every folder that exists: saved ones, ones NPCs are in, and all their parents. */
+function allFolders() {
+    const out = new Set();
+    const add = (p) => { p = normFolder(p); while (p) { out.add(p); p = folderParent(p); } };
+    for (const f of settings().folders) add(f);
+    for (const t of Object.values(lib())) add(t.folder);
+    return [...out].sort((a, b) => a.localeCompare(b));
+}
+
+function registerFolder(path) {
+    const s = settings();
+    path = normFolder(path);
+    if (path && !s.folders.includes(path)) s.folders.push(path);
+}
+
+/** Rename / move a folder (and everything under it). */
+function renameFolder(from, to) {
+    const s = settings();
+    const re = (p) => (p === from ? to : p.startsWith(`${from}/`) ? normFolder(`${to}/${p.slice(from.length + 1)}`) : p);
+    for (const t of Object.values(lib())) if (t.folder) t.folder = re(t.folder);
+    s.folders = [...new Set(s.folders.map(re).filter(Boolean))];
+    s.folderCollapsed = [...new Set(s.folderCollapsed.map(re).filter(Boolean))];
+}
+
+/** Remove a folder level: its NPCs and subfolders move up to the parent. Nothing is deleted. */
+function dissolveFolder(path) {
+    const s = settings();
+    const parent = folderParent(path);
+    const re = (p) => (p === path ? parent : p.startsWith(`${path}/`) ? normFolder(`${parent}/${p.slice(path.length + 1)}`) : p);
+    for (const t of Object.values(lib())) if (t.folder) t.folder = re(t.folder);
+    s.folders = [...new Set(s.folders.filter(f => f !== path).map(re).filter(Boolean))];
+    s.folderCollapsed = s.folderCollapsed.filter(f => !inFolder(f, path));
+}
+
+function moveNpcToFolder(id, path) {
+    const t = lib()[id];
+    if (!t) return;
+    t.folder = normFolder(path);
+    registerFolder(t.folder);
+    save();
+    renderLibraryList();
+    if (libSelected === id) $('#npcb_library .npcb-ed-folder').val(t.folder);
+}
+
+async function askFolderName(title, value = '') {
+    const c = ctx();
+    const res = await c.callGenericPopup(title, c.POPUP_TYPE.INPUT, value, { okButton: 'OK', cancelButton: 'Cancel' });
+    if (res === null || res === false || res === undefined) return null;
+    return normFolder(res);
+}
+
+function openMenu(anchor, items) {
+    closePopovers();
+    const pop = $(`<div class="npcb-popover npcb-menu">${items.map((x, i) => `<div class="npcb-menu-item ${x.danger ? 'npcb-menu-danger' : ''}" data-i="${i}"><i class="fa-solid ${x.icon}"></i> ${esc(x.label)}</div>`).join('')}</div>`);
+    pop.on('click', e => e.stopPropagation());
+    pop.on('click', '.npcb-menu-item', (e) => { const x = items[Number($(e.currentTarget).data('i'))]; closePopovers(); x?.run(); });
+    placePopover(pop, anchor);
+}
+
+function openFolderMenu(anchor, path) {
+    const s = settings();
+    const npcs = () => Object.values(lib()).filter(t => inFolder(normFolder(t.folder), path));
+    openMenu(anchor, [
+        { icon: 'fa-user-plus', label: 'New NPC here', run: () => { libNewFolder = path; selectTemplate(null, true); } },
+        { icon: 'fa-folder-plus', label: 'New subfolder…', run: async () => {
+            const name = await askFolderName(`New folder inside <b>${esc(path)}</b>:`);
+            if (!name) return;
+            registerFolder(`${path}/${name}`);
+            s.folderCollapsed = s.folderCollapsed.filter(f => f !== path);
+            save(); renderLibraryList();
+        } },
+        { icon: 'fa-pen', label: 'Rename / move…', run: async () => {
+            const to = await askFolderName('Folder path (use / for subfolders):', path);
+            if (!to || to === path) return;
+            if (inFolder(to, path)) { toastr.warning('A folder cannot be moved into itself.', 'NPC Book'); return; }
+            renameFolder(path, to);
+            save(); renderLibraryList();
+            if (libSelected && lib()[libSelected]) $('#npcb_library .npcb-ed-folder').val(lib()[libSelected].folder || '');
+        } },
+        { icon: 'fa-file-export', label: `Export folder (${npcs().length})`, run: () => exportNpcs(npcs(), `${slugify(path)}.npcbook.json`) },
+        { icon: 'fa-folder-minus', label: 'Remove folder (keeps NPCs)', danger: true, run: async () => {
+            const c = ctx();
+            const parent = folderParent(path);
+            const ok = await c.callGenericPopup(`Remove the folder <b>${esc(path)}</b>? Its ${npcs().length} NPC(s) and subfolders move to <b>${esc(parent || 'the top level')}</b>. No NPCs are deleted.`, c.POPUP_TYPE.CONFIRM);
+            if (!ok) return;
+            dissolveFolder(path);
+            save(); renderLibraryList();
+            if (libSelected && lib()[libSelected]) $('#npcb_library .npcb-ed-folder').val(lib()[libSelected].folder || '');
+        } },
+    ]);
+}
+
+function libItemHtml(t, present, depth, showPath) {
+    return `<div class="npcb-lib-item ${t.id === libSelected && !libIsNew ? 'active' : ''}" data-id="${esc(t.id)}" draggable="true" style="padding-left:${6 + depth * 14}px">
+          ${avatarHtml(t, t.name, 'npcb-ava-sm')}
+          <div class="npcb-lib-item-text"><div>${esc(t.name)} ${present.has(t.id) ? '<i class="fa-solid fa-circle npcb-present-dot" title="In this scene"></i>' : ''}${t.auto ? ' <small class="npcb-badge">auto</small>' : ''}</div>
+          <small class="npcb-dim">${esc(showPath && t.folder ? `${t.folder} · ${t.id}` : t.id)}</small></div>
+        </div>`;
+}
+
 function renderLibraryList() {
     const modal = $('#npcb_library');
     if (!modal.length) return;
+    const s = settings();
     const q = normalize(modal.find('.npcb-lib-search').val());
     const present = new Set(hasChat() ? currentRoster().map(i => i.id) : []);
-    const items = Object.values(lib())
-        .filter(t => !q || normalize(`${t.name} ${t.id} ${t.description}`).includes(q))
-        .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
-    modal.find('.npcb-lib-list').html(items.length ? items.map(t => `
-        <div class="npcb-lib-item ${t.id === libSelected && !libIsNew ? 'active' : ''}" data-id="${esc(t.id)}">
-          ${avatarHtml(t, t.name, 'npcb-ava-sm')}
-          <div class="npcb-lib-item-text"><div>${esc(t.name)} ${present.has(t.id) ? '<i class="fa-solid fa-circle npcb-present-dot" title="In this scene"></i>' : ''}${t.auto ? ' <small class="npcb-badge">auto</small>' : ''}</div>
-          <small class="npcb-dim">${esc(t.id)}</small></div>
-        </div>`).join('') : '<div class="npcb-empty">No NPCs yet.</div>');
+    const byName = (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+    const all = Object.values(lib());
+    const list = modal.find('.npcb-lib-list');
+    if (q) {
+        const hits = all.filter(t => normalize(`${t.name} ${t.id} ${t.description} ${t.folder || ''}`).includes(q)).sort(byName);
+        list.html(hits.length ? hits.map(t => libItemHtml(t, present, 0, true)).join('') : '<div class="npcb-empty">No matching NPCs.</div>');
+        return;
+    }
+    if (!all.length && !s.folders.length) { list.html('<div class="npcb-empty">No NPCs yet.</div>'); return; }
+    const folders = allFolders();
+    const collapsed = new Set(s.folderCollapsed);
+    const npcsIn = (path) => all.filter(t => normFolder(t.folder) === path).sort(byName);
+    const countIn = (path) => all.filter(t => inFolder(normFolder(t.folder), path)).length;
+    const draw = (parent, depth) => {
+        let html = '';
+        for (const f of folders.filter(x => folderParent(x) === parent)) {
+            const open = !collapsed.has(f);
+            html += `<div class="npcb-lib-folder" data-path="${esc(f)}" style="padding-left:${4 + depth * 14}px">
+                <i class="fa-solid fa-chevron-${open ? 'down' : 'right'} npcb-lib-fchev"></i><i class="fa-solid fa-folder${open ? '-open' : ''}"></i>
+                <span class="npcb-lib-fname">${esc(f.split('/').pop())}</span><small class="npcb-dim">${countIn(f)}</small>
+                <i class="fa-solid fa-ellipsis npcb-lib-fmenu" title="Folder actions"></i></div>`;
+            if (open) html += draw(f, depth + 1);
+        }
+        return html + npcsIn(parent).map(t => libItemHtml(t, present, depth, false)).join('');
+    };
+    list.html(draw('', 0));
 }
 
 function selectTemplate(id, isNew = false, tab = 'card') {
@@ -1844,7 +2008,7 @@ function selectTemplate(id, isNew = false, tab = 'card') {
     libDraftWardrobe = null;
     renderLibraryList();
     const ed = $('#npcb_library .npcb-lib-editor');
-    const t = isNew ? { id: '', name: '', portrait: '', description: '', details: '', traits: {}, color: pickColor() } : lib()[id];
+    const t = isNew ? { id: '', name: '', portrait: '', description: '', details: '', traits: {}, color: pickColor(), folder: libNewFolder } : lib()[id];
     if (!t) { ed.html('<div class="npcb-empty">Select or create an NPC.</div>'); return; }
     const s = settings();
     const traitKeys = [...new Set([...s.traitKeys, ...Object.keys(t.traits || {})])];
@@ -1862,6 +2026,8 @@ function selectTemplate(id, isNew = false, tab = 'card') {
           <label>ID ${isNew ? '<small class="npcb-dim">(unique, cannot be changed later)</small>' : '<small class="npcb-dim">(locked)</small>'}
             <input class="text_pole npcb-ed-id" value="${esc(t.id)}" ${isNew ? '' : 'disabled'} placeholder="auto from name"></label>
           <label>Name<input class="text_pole npcb-ed-name" value="${esc(t.name)}" placeholder="Display name"></label>
+          <label>Folder<input class="text_pole npcb-ed-folder" list="npcb_folder_list" value="${esc(t.folder || '')}" placeholder="none (top level) — use / for subfolders"></label>
+          <datalist id="npcb_folder_list">${allFolders().map(f => `<option value="${esc(f)}"></option>`).join('')}</datalist>
           <label>Dialogue color <small class="npcb-dim">(their dialogue in speaker cards, and their name in the scene bar)</small>
             <div class="npcb-row npcb-color-row">
               <input type="color" class="npcb-ed-color" value="${HEX_RE.test(t.color || '') ? t.color : '#ffffff'}">
@@ -2030,6 +2196,7 @@ async function saveTemplateFromEditor(t, isNew) {
     lib()[id] = {
         ...(isNew ? {} : t),
         id, name, portrait,
+        folder: normFolder(ed.find('.npcb-ed-folder').val()),
         description: String(ed.find('.npcb-ed-desc').val() ?? ''),
         details: String(ed.find('.npcb-ed-details').val() ?? ''),
         traits,
@@ -2045,6 +2212,7 @@ async function saveTemplateFromEditor(t, isNew) {
         created: t.created || Date.now(),
         updated: Date.now(),
     };
+    registerFolder(lib()[id].folder);
     save();
     toastr.success(`Saved ${name}.`, 'NPC Book');
     // Keep the live scene in sync with the card's wardrobe.
@@ -2221,6 +2389,8 @@ async function importLibrary(e) {
             if (String(npc.portrait).startsWith('data:')) {
                 try { npc.portrait = await uploadPortrait(npc.portrait, id); } catch (err) { console.warn('[NPC Book] portrait upload failed, keeping it inline', err); }
             }
+            npc.folder = normFolder(npc.folder);
+            registerFolder(npc.folder);
             lib()[id] = npc;
             added++;
         }
@@ -2659,6 +2829,7 @@ async function mountSettings() {
     bind('#npcb_header', 'sceneHeader');
     bind('#npcb_include_lib', 'includeLibrary', 'checkbox');
     bind('#npcb_autocreate', 'autoCreate', 'checkbox');
+    bind('#npcb_autofolder', 'autoFolder');
     bind('#npcb_trackchar', 'trackChar', 'checkbox');
     bind('#npcb_trackuser', 'trackUser', 'checkbox');
     bind('#npcb_personainuser', 'personaInUser', 'checkbox');
