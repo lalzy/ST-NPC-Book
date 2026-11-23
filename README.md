@@ -70,3 +70,33 @@ Click the portrait on a card to choose:
 After you pick an image, a square crop opens (it works with mouse or touch). Choose *Use full image* to skip cropping.
 
 Generated portraits are always framed as portraits: a portrait prefix goes first, close-up tags are removed, and a negative prompt against cropped faces is added. All three are editable in settings. The LLM gets the NPC's identity (race, age, gender, role), Details, Notes (Description) and the outfit worn right now. That is the **Starting outfit** in the library, or the current outfit during a story.
+
+## Scene format (XML)
+`{{npcScene}}` is sent as XML:
+
+```xml
+<user name="...">
+  <description>persona description</description>
+  <state posture="..."/>
+  <wearing>...</wearing>
+  <wardrobe>...</wardrobe>
+</user>
+<characters>
+<char name="..." id="...">
+  <identity race="..." age="..." gender="..." role="..."/>
+  <details>...</details>
+  <state posture="..." mood="..." dialogue_color="#..."/>
+  <feelings>...</feelings>
+  <wearing>...</wearing>
+  <wardrobe>...</wardrobe>
+</char>
+</characters>
+```
+
+Empty fields are left out. If *Put my persona description inside &lt;user&gt;* is on, turn off SillyTavern's own Persona Description prompt so it isn't sent twice.
+
+## Sister extensions
+Other extensions can add a tab to NPC cards, a sheet for your persona, XML inside each `<char>` and `<user>`, and rules for new NPCs. They do this through `window.NPCBook.registerExtension({...})`, which is available once the `npcbook:ready` event has fired. See *NPC Book — GURPS* for an example.
+
+## Persona character
+Persona Management → **Connections** → **NPC Book** opens the selected persona's wardrobe, starting outfit and any sister-extension sheets (such as GURPS) in one window. Name, avatar and description stay in Persona Management.

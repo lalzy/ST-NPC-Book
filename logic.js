@@ -472,3 +472,34 @@ export function normColor(c) {
     if (rgb) v = `#${[rgb[1], rgb[2], rgb[3]].map(x => Number(x).toString(16).padStart(2, '0')).join('')}`;
     return /^#[0-9a-f]{6}$/.test(v) ? v : '';
 }
+
+/**
+ * Plain-language exposure summary from what is worn, e.g. "completely naked", "topless, barefoot",
+ * "in underwear only". Returns '' when nothing notable is exposed.
+ */
+export function exposureSummary(outfit, wardrobe) {
+    const by = outfitBySlot(outfit, wardrobe);
+    const has = (k) => (by[k] || []).length > 0;
+    const anything = SLOTS.some(s => has(s.key));
+    if (!anything) return 'completely naked';
+    const upperOuter = has('cover') || has('upper_outer');
+    const upperInner = has('upper_inner');
+    const lowerOuter = has('lower_outer');
+    const lowerInner = has('lower_inner');
+    const feet = has('feet_outer') || has('feet_inner');
+    const out = [];
+    const noUpper = !upperOuter && !upperInner;
+    const noLower = !lowerOuter && !lowerInner;
+    if (noUpper && noLower) out.push('naked except for accessories');
+    else {
+        if (noUpper) out.push('topless (bare chest)');
+        else if (!upperOuter && upperInner) out.push('upper body in underwear only');
+        if (noLower) out.push('bottomless (genitals exposed)');
+        else if (!lowerOuter && lowerInner) out.push('lower body in underwear only');
+        if (!upperOuter && !lowerOuter && upperInner && lowerInner) {
+            out.splice(0, out.length, 'in underwear only');
+        }
+    }
+    if (!feet) out.push('barefoot');
+    return out.join(', ');
+}

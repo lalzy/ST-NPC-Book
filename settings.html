@@ -98,8 +98,10 @@
 
             <hr>
             <h4>You &amp; clothing</h4>
+            <label class="checkbox_label"><input type="checkbox" id="npcb_personainuser"> Put my persona description inside <code>&lt;user&gt;</code> (then disable SillyTavern's own Persona Description prompt to avoid sending it twice)</label>
             <label class="checkbox_label"><input type="checkbox" id="npcb_trackuser"> Track me (persona): posture + outfit, shown left of the scene</label>
             <label class="checkbox_label"><input type="checkbox" id="npcb_trackoutfits"> Track outfits (paperdoll + wardrobe)</label>
+            <label class="checkbox_label"><input type="checkbox" id="npcb_exposure"> Spell out exposure on &lt;wearing&gt; (completely naked, topless, in underwear only, barefoot…)</label>
             <label class="checkbox_label"><input type="checkbox" id="npcb_incwardrobe"> Send each character's wardrobe list to the LLM</label>
             <label class="checkbox_label"><input type="checkbox" id="npcb_wdgrowth"> Let the LLM add new items to an existing wardrobe</label>
             <label>Clothing rules (inserted at <code>[[OUTFIT_RULES]]</code>; placeholders <code>[[CONDITIONS]]</code> <code>[[SLOTS]]</code>)

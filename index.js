@@ -3,7 +3,7 @@
 
 import {
     extractTracker, applyTracker, uniqueId, slugify, ID_PATTERN, normalize, pickEnum,
-    extractCharacterList, resolveRef, normColor,
+    extractCharacterList, resolveRef, normColor, exposureSummary,
     SLOTS, STACKING_SLOTS, applyOutfitChange, outfitFromDefault, outfitBySlot, wearItem, findItem, normOutfitChange, inferSlots,
 } from './logic.js';
 import { promptManager } from '../../../openai.js';
@@ -43,6 +43,7 @@ const DEFAULT_OUTFIT_RULES = `Clothing:
 - Each character may ONLY wear items from their own Wardrobe (listed with the scene). Never invent clothing for a character who has a wardrobe.
 - When someone's clothing changes, add "outfit": {"wear": ["item_id"], "remove": ["item_id"], "condition": {"item_id": "<condition>"}}. Leave "outfit" out when nothing changed. Putting an item on replaces whatever already occupies the same body slots.
 - Pick clothing that fits the situation (e.g. sleepwear for bed, then a day outfit after waking).
+- <wearing> is what each character has on RIGHT NOW. Its "exposure" (e.g. completely naked, topless, barefoot) is literal: describe and react to it accordingly.
 - "condition" must be one of: [[CONDITIONS]]
 - For a NEW character also add "wardrobe": 4-8 items that fit them, as [{"name": "...", "slots": ["..."]}], and "outfit": {"wear": ["item name", ...]} for what they wear right now. Slots: [[SLOTS]]`;
 
@@ -133,7 +134,8 @@ const DEFAULTS = {
     scenePosition: 1, sceneDepth: 2, sceneRole: 0,
     instrPosition: 1, instrDepth: 0, instrRole: 0,
     instructions: DEFAULT_INSTRUCTIONS,
-    sceneHeader: '[NPCs present in the scene]',
+    sceneHeader: '',
+    personaInUser: true,
     includeLibrary: true,
     threshold: 50,
     numericTolerance: 2,
@@ -154,6 +156,7 @@ const DEFAULTS = {
     portraitNegative: 'close-up, extreme close-up, cropped head, head out of frame, partial face, cut off, multiple people, text, watermark',
     portraitLlmPrompt: DEFAULT_PORTRAIT_LLM_PROMPT,
     dialogueColors: true,
+    describeExposure: true,
     colorRule: DEFAULT_COLOR_RULE,
     trackOutfits: true,
     includeWardrobe: true,
@@ -163,6 +166,9 @@ const DEFAULTS = {
     personas: {},
     library: {},
 };
+
+/** Sister extensions registered through window.NPCBook.registerExtension(). */
+const extensions = new Map();
 
 let genCtx = null; // { type, pre, targetIdx }
 let processing = false;
@@ -181,6 +187,10 @@ function settings() {
     }
     if (typeof s.instructions === 'string' && !s.instructions.includes('[[OUTFIT_RULES]]') && s.instructions.includes('\nFormat:\n')) {
         s.instructions = s.instructions.replace('\nFormat:\n', '[[OUTFIT_RULES]]\n\nFormat:\n');
+    }
+    if (s.sceneHeader === '[NPCs present in the scene]') s.sceneHeader = '';
+    if (typeof s.outfitRules === 'string' && !s.outfitRules.includes('exposure') && s.outfitRules.includes('- Pick clothing that fits the situation (e.g. sleepwear for bed, then a day outfit after waking).')) {
+        s.outfitRules = s.outfitRules.replace('- Pick clothing that fits the situation (e.g. sleepwear for bed, then a day outfit after waking).', '- Pick clothing that fits the situation (e.g. sleepwear for bed, then a day outfit after waking).\n- <wearing> is what each character has on RIGHT NOW. Its "exposure" (e.g. completely naked, topless, barefoot) is literal: describe and react to it accordingly.');
     }
     if (JSON.stringify(s.traitKeys) === JSON.stringify(['age', 'gender', 'role'])) s.traitKeys = ['race', 'age', 'gender', 'role'];
     if (!s.portraitTemplateV2 && s.portraitLlmPrompt === DEFAULT_PORTRAIT_LLM_PROMPT_V1) s.portraitLlmPrompt = DEFAULT_PORTRAIT_LLM_PROMPT;
@@ -266,10 +276,20 @@ function personaData(key = personaKey()) {
 function freshUser(prev) {
     const s = settings();
     const p = personaData();
-    return { persona: personaKey(), posture: prev?.posture ?? s.postures[0] ?? '', outfit: outfitFromDefault(p.defaultWorn, p.wardrobe, s.conditions) };
+    const outfit = outfitFromDefault(p.defaultWorn, p.wardrobe, s.conditions);
+    return { persona: personaKey(), posture: prev?.posture ?? s.postures[0] ?? '', outfit, dressed: outfit.length > 0 };
 }
+/**
+ * Make a stored user state usable for the current persona.
+ * An empty outfit that was never deliberately set ("dressed" false/missing) falls back to the starting outfit,
+ * so chats saved before the persona's wardrobe existed don't report "nothing".
+ */
 function adaptUser(u) {
     if (!u || u.persona !== personaKey()) return freshUser(u);
+    if (!u.dressed && !(u.outfit || []).length) {
+        const f = freshUser(u);
+        if (f.outfit.length) return { ...u, outfit: f.outfit, dressed: true };
+    }
     return u;
 }
 function currentUser() {
@@ -353,7 +373,11 @@ function traitSummary(t) {
 
 const SLOT_LABEL = Object.fromEntries(SLOTS.map(x => [x.key, x.label]));
 
-function wearingLine(outfit, wardrobe) {
+function xa(v) { return String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function xt(v) { return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function indent(text, n) { const pad = ' '.repeat(n); return String(text).split('\n').map(l => (l ? pad + l : l)).join('\n'); }
+
+function wearingText(outfit, wardrobe) {
     const s = settings();
     const def = s.conditions[0];
     const parts = (outfit || []).map(w => {
@@ -362,34 +386,80 @@ function wearingLine(outfit, wardrobe) {
         const cond = w.condition && w.condition !== def ? ` (${w.condition})` : '';
         return `${it.slots.map(k => SLOT_LABEL[k] || k).join(' + ')}: ${it.name}${cond}`;
     }).filter(Boolean);
-    return `Wearing: ${parts.length ? parts.join('; ') : 'nothing'}`;
+    return parts.length ? parts.join('; ') : 'nothing';
 }
 
-function wardrobeLine(wardrobe) {
+function wardrobeText(wardrobe) {
     if (!wardrobe?.length) return '';
-    return `Wardrobe: ${wardrobe.map(i => `${i.id} = ${i.name} [${i.slots.map(k => SLOT_LABEL[k] || k).join(', ')}]`).join('; ')}`;
+    return wardrobe.map(i => `${i.id} = ${i.name} [${i.slots.map(k => SLOT_LABEL[k] || k).join(', ')}]`).join('; ');
 }
 
-function outfitLines(outfit, wardrobe) {
+function outfitXml(outfit, wardrobe) {
     const s = settings();
     if (!s.trackOutfits) return [];
     if (!wardrobe?.length && !(outfit || []).length) return [];
-    const out = [wearingLine(outfit, wardrobe)];
-    if (s.includeWardrobe) { const wl = wardrobeLine(wardrobe); if (wl) out.push(wl); }
+    const exp = s.describeExposure ? exposureSummary(outfit, wardrobe) : '';
+    const out = [`<wearing${exp ? ` exposure="${xa(exp)}"` : ''}>${xt(wearingText(outfit, wardrobe))}</wearing>`];
+    if (s.includeWardrobe) { const wt = wardrobeText(wardrobe); if (wt) out.push(`<wardrobe>${xt(wt)}</wardrobe>`); }
     return out;
+}
+
+/** XML contributed by sister extensions for one subject. */
+function extXml(subject) {
+    const out = [];
+    for (const ext of extensions.values()) {
+        if (typeof ext.sceneXml !== 'function') continue;
+        try {
+            const data = subject.kind === 'user' ? personaData().ext?.[ext.id] : subject.template?.ext?.[ext.id];
+            if (!data) continue;
+            const xml = ext.sceneXml({ ...subject, data });
+            if (xml && String(xml).trim()) out.push(String(xml).trim());
+        } catch (e) { console.warn(`[NPC Book] extension ${ext.id} sceneXml failed`, e); }
+    }
+    return out;
+}
+
+function personaDescription() {
+    const c = ctx();
+    const raw = c.powerUserSettings?.persona_description || '';
+    try { return c.substituteParams ? c.substituteParams(raw) : raw; } catch { return raw; }
 }
 
 function buildUserBlock() {
     const s = settings();
-    if (!s.trackUser) return '';
     const c = ctx();
-    const u = promptUser();
-    const p = personaData();
-    const lines = [`<user name="${c.name1}">`];
-    if (u.posture) lines.push(`Posture: ${u.posture}`);
-    lines.push(...outfitLines(u.outfit, p.wardrobe));
-    lines.push('</user>');
-    return lines.join('\n');
+    const inner = [];
+    if (s.personaInUser) { const d = personaDescription().trim(); if (d) inner.push(`<description>${xt(d)}</description>`); }
+    if (s.trackUser) {
+        const u = promptUser();
+        const p = personaData();
+        if (u.posture) inner.push(`<state posture="${xa(u.posture)}"/>`);
+        inner.push(...outfitXml(u.outfit, p.wardrobe));
+    }
+    inner.push(...extXml({ kind: 'user', name: c.name1 }));
+    if (!inner.length) return '';
+    return [`<user name="${xa(c.name1)}">`, ...inner.map(x => indent(x, 2)), '</user>'].join('\n');
+}
+
+function buildCharBlock(inst) {
+    const s = settings();
+    const t = templateFor(inst);
+    const name = t?.name ?? inst.name ?? inst.id;
+    const inner = [];
+    const idAttrs = s.traitKeys.map(k => (t?.traits?.[k] ? ` ${k}="${xa(t.traits[k])}"` : '')).join('');
+    if (idAttrs) inner.push(`<identity${idAttrs}/>`);
+    const details = (t?.details ?? '').trim();
+    if (details) inner.push(`<details>${xt(details)}</details>`);
+    const stAttrs = [
+        inst.posture && `posture="${xa(inst.posture)}"`,
+        inst.state && `mood="${xa(inst.state)}"`,
+        s.dialogueColors && HEX_RE.test(t?.color || '') && `dialogue_color="${xa(t.color)}"`,
+    ].filter(Boolean).join(' ');
+    if (stAttrs) inner.push(`<state ${stAttrs}/>`);
+    if (inst.feelings) inner.push(`<feelings>${xt(inst.feelings)}</feelings>`);
+    inner.push(...outfitXml(inst.outfit, t?.wardrobe));
+    inner.push(...extXml({ kind: 'char', name, id: inst.id, template: t, instance: inst }));
+    return [`<char name="${xa(name)}" id="${xa(inst.id)}">`, ...inner.map(x => indent(x, 2)), '</char>'].join('\n');
 }
 
 function buildSceneText() {
@@ -398,21 +468,20 @@ function buildSceneText() {
     const roster = promptRoster();
     const userBlock = buildUserBlock();
     if (!roster.length && !userBlock) return '';
-    const blocks = roster.map(inst => {
-        const t = templateFor(inst);
-        const name = t?.name ?? inst.name ?? inst.id;
-        const details = (t?.details ?? '').trim();
-        const lines = [`<npc id="${inst.id}" name="${name}">`];
-        if (details) lines.push(details);
-        const ps = [inst.posture && `Posture: ${inst.posture}`, inst.state && `State: ${inst.state}`].filter(Boolean).join(' | ');
-        if (ps) lines.push(ps);
-        if (s.dialogueColors && HEX_RE.test(t?.color || '')) lines.push(`Dialogue color: ${t.color}`);
-        if (inst.feelings) lines.push(`Inner feelings: ${inst.feelings}`);
-        lines.push(...outfitLines(inst.outfit, t?.wardrobe));
-        lines.push('</npc>');
-        return lines.join('\n');
-    });
-    return [s.sceneHeader, userBlock, ...blocks].filter(Boolean).join('\n');
+    const parts = [];
+    if (s.sceneHeader) parts.push(s.sceneHeader);
+    if (userBlock) parts.push(userBlock);
+    if (roster.length) parts.push(['<characters>', ...roster.map(buildCharBlock), '</characters>'].join('\n'));
+    return parts.join('\n');
+}
+
+function extInstructions() {
+    const out = [];
+    for (const ext of extensions.values()) {
+        if (typeof ext.instructions !== 'function') continue;
+        try { const t = ext.instructions({ autoCreate: settings().autoCreate }); if (t) out.push(String(t)); } catch (e) { console.warn(e); }
+    }
+    return out;
 }
 
 function buildInstructionText() {
@@ -428,7 +497,7 @@ function buildInstructionText() {
         : [];
     return String(s.instructions || '')
         .replaceAll('[[COLOR_RULE]]', s.dialogueColors ? s.colorRule : '')
-        .replaceAll('[[OUTFIT_RULES]]', [s.trackOutfits ? s.outfitRules : '', s.trackUser ? DEFAULT_USER_RULE : ''].filter(Boolean).join('\n'))
+        .replaceAll('[[OUTFIT_RULES]]', [s.trackOutfits ? s.outfitRules : '', s.trackUser ? DEFAULT_USER_RULE : '', ...extInstructions()].filter(Boolean).join('\n'))
         .replaceAll('[[USER_EXAMPLE]]', s.trackUser ? ',\n  {"id": "user", "posture": "..."}' : '')
         .replaceAll('[[CONDITIONS]]', s.conditions.join(', '))
         .replaceAll('[[SLOTS]]', SLOTS.map(x => x.key).join(', '))
@@ -584,6 +653,7 @@ async function processLastMessage() {
                     if (s.trackOutfits) {
                         const oc = applyOutfitChange(u.outfit, p.wardrobe, normOutfitChange(userEntry), s.conditions);
                         u.outfit = oc.outfit;
+                        if (userEntry.outfit || userEntry.wear) u.dressed = true;
                         if (oc.rejected.length) console.debug('[NPC Book] user outfit items not in wardrobe:', oc.rejected);
                     }
                     postUser = u;
@@ -600,7 +670,15 @@ async function processLastMessage() {
                     traitKeys: s.traitKeys,
                     excludeNames,
                 });
-                for (const t of r.created) { t.color = t.color || pickColor(); lib()[t.id] = t; }
+                for (const t of r.created) {
+                    t.color = t.color || pickColor();
+                    const entry = ex.json.find(e => e && normalize(e.name) === normalize(t.name));
+                    for (const ext of extensions.values()) {
+                        if (typeof ext.fromTracker !== 'function' || !entry) continue;
+                        try { const d = ext.fromTracker(entry, t); if (d) { t.ext = t.ext || {}; t.ext[ext.id] = d; } } catch (e) { console.warn(`[NPC Book] ${ext.id} fromTracker failed`, e); }
+                    }
+                    lib()[t.id] = t;
+                }
                 for (const t of r.updated || []) lib()[t.id] = t;
                 if (r.updated?.length) save();
                 if (r.created.length) {
@@ -1087,6 +1165,7 @@ function openInstanceEditor(id, anchor) {
             <div class="menu_button npcb-i-card" ${t ? '' : 'style="display:none"'}><i class="fa-solid fa-id-card"></i> Card</div>
             <div class="menu_button npcb-i-remove redWarningBG"><i class="fa-solid fa-user-minus"></i> Remove</div>
         </div>
+        ${t ? `<div class="npcb-row">${[...extensions.values()].filter(x => x.cardTab).map(x => `<div class="menu_button npcb-i-ext" data-ext="${esc(x.id)}"><i class="fa-solid ${esc(x.personaSheet?.icon || x.cardTab.icon || 'fa-table-list')}"></i> ${esc(x.sheetLabel || `${x.cardTab.label || x.id} sheet`)}</div>`).join('')}</div>` : ''}
     </div>`);
     pop.on('click', e => e.stopPropagation());
     let draftOutfit = clone(inst.outfit ?? outfitFromDefault(t?.defaultWorn, t?.wardrobe || [], s.conditions));
@@ -1106,6 +1185,7 @@ function openInstanceEditor(id, anchor) {
     });
     pop.on('click', '.npcb-i-remove', () => { removeFromScene(id); closePopovers(); });
     pop.on('click', '.npcb-i-card', () => { closePopovers(); openLibrary(id); });
+    pop.on('click', '.npcb-i-ext', (e) => { const x = $(e.currentTarget).data('ext'); closePopovers(); openTemplateExtSheet(id, x); });
     placePopover(pop, anchor);
 }
 
@@ -1258,16 +1338,119 @@ function openUserEditor(anchor) {
         <div class="npcb-inst-head">${ava}<div><b>${esc(c.name1)}</b><br><small class="npcb-dim">you · persona</small></div></div>
         <label>Current posture<select class="text_pole npcb-u-posture">${opts(s.postures, u.posture)}</select></label>
         <div class="npcb-doll-host"></div>
-        <div class="npcb-row"><div class="menu_button npcb-u-save"><i class="fa-solid fa-check"></i> Save</div></div>
+        <div class="npcb-row"><div class="menu_button npcb-u-save"><i class="fa-solid fa-check"></i> Save</div>
+        ${[...extensions.values()].filter(x => x.personaSheet).map(x => `<div class="menu_button npcb-u-ext" data-ext="${esc(x.id)}"><i class="fa-solid ${esc(x.personaSheet.icon || 'fa-table-list')}"></i> ${esc(x.personaSheet.label || x.id)}</div>`).join('')}</div>
     </div>`);
+    pop.on('click', '.npcb-u-ext', (e) => { const id = $(e.currentTarget).data('ext'); closePopovers(); openPersonaCharacter(`ext:${id}`); });
     pop.on('click', e => e.stopPropagation());
     let draft = u.outfit;
-    mountPaperdoll(pop.find('.npcb-doll-host'), () => draft, (o) => { draft = o; }, () => personaData().wardrobe, () => { closePopovers(); openPersonaWardrobe(); });
+    mountPaperdoll(pop.find('.npcb-doll-host'), () => draft, (o) => { draft = o; }, () => personaData().wardrobe, () => { closePopovers(); openPersonaCharacter('wardrobe'); });
     pop.on('click', '.npcb-u-save', () => {
-        writeCurrentRoster(null, { ...u, posture: String(pop.find('.npcb-u-posture').val() ?? ''), outfit: draft });
+        writeCurrentRoster(null, { ...u, posture: String(pop.find('.npcb-u-posture').val() ?? ''), outfit: draft, dressed: true });
         closePopovers();
     });
     placePopover(pop, anchor);
+}
+
+/** Persona character editor: wardrobe, starting outfit and every sister-extension sheet (e.g. GURPS), in one window. */
+async function openPersonaCharacter(tab = 'wardrobe') {
+    const c = ctx();
+    const p = personaData();
+    p.ext = p.ext || {};
+    const draft = clone({ wardrobe: p.wardrobe, defaultWorn: p.defaultWorn, ext: p.ext });
+    const extTabs = [...extensions.values()].filter(x => x.personaSheet);
+    for (const x of extTabs) if (!draft.ext[x.id]) draft.ext[x.id] = typeof x.defaultData === 'function' ? x.defaultData() : {};
+    const ava = personaKey() ? `<img class="npcb-ava npcb-ava-md" src="${esc(getUserAvatar(personaKey()))}">` : avatarHtml(null, c.name1, 'npcb-ava-md');
+    const box = $(`<div class="npcb-persona-char">
+        <div class="npcb-inst-head">${ava}<div><b>${esc(c.name1)}</b><br><small class="npcb-dim">persona character · description, name and avatar come from Persona Management</small></div></div>
+        <div class="npcb-tabs">
+            <div class="npcb-tab ${tab === 'wardrobe' ? 'active' : ''}" data-tab="wardrobe">Wardrobe</div>
+            <div class="npcb-tab ${tab === 'outfit' ? 'active' : ''}" data-tab="outfit">Starting outfit</div>
+            ${extTabs.map(x => `<div class="npcb-tab ${tab === `ext:${x.id}` ? 'active' : ''}" data-tab="ext:${esc(x.id)}">${esc(x.personaSheet.label || x.id)}</div>`).join('')}
+        </div>
+        <div class="npcb-tabpane" data-pane="wardrobe" ${tab === 'wardrobe' ? '' : 'style="display:none"'}><div class="npcb-wd-host"></div></div>
+        <div class="npcb-tabpane" data-pane="outfit" ${tab === 'outfit' ? '' : 'style="display:none"'}>
+            <small class="npcb-dim">What you wear when a new chat starts (and when you switch to this persona).</small>
+            <div class="npcb-start-doll"></div>
+        </div>
+        ${extTabs.map(x => `<div class="npcb-tabpane" data-pane="ext:${esc(x.id)}" ${tab === `ext:${x.id}` ? '' : 'style="display:none"'}><div class="npcb-ext-host" data-ext="${esc(x.id)}"></div></div>`).join('')}
+    </div>`);
+    bindTabs(box);
+    const mountWd = () => mountWardrobeEditor(box.find('.npcb-wd-host'), draft);
+    const mountDoll = () => mountPaperdoll(
+        box.find('.npcb-start-doll'),
+        () => draft.defaultWorn.map(id => ({ id, condition: settings().conditions[0] })),
+        (o) => { draft.defaultWorn = o.map(w => w.id); },
+        () => draft.wardrobe,
+        () => box.find('.npcb-tab[data-tab="wardrobe"]').trigger('click'),
+    );
+    box.on('click', '.npcb-tab[data-tab="wardrobe"]', mountWd);
+    box.on('click', '.npcb-tab[data-tab="outfit"]', mountDoll);
+    mountWd();
+    mountDoll();
+    for (const x of extTabs) {
+        try { x.personaSheet.render(box.find(`.npcb-ext-host[data-ext="${x.id}"]`), { data: draft.ext[x.id], kind: 'user', name: c.name1 }); } catch (e) { console.error(e); }
+    }
+    const ok = await c.callGenericPopup(box, c.POPUP_TYPE.CONFIRM, '', { wide: true, large: true, allowVerticalScrolling: true, okButton: 'Save', cancelButton: 'Cancel' });
+    if (!ok) return;
+    p.wardrobe = draft.wardrobe.filter(i => i.name.trim());
+    p.defaultWorn = draft.defaultWorn.filter(id => p.wardrobe.some(i => i.id === id));
+    p.ext = draft.ext;
+    save();
+    if (hasChat()) {
+        const u = currentUser();
+        let outfit = (u.outfit || []).filter(w => p.wardrobe.some(i => i.id === w.id));
+        if (!outfit.length) outfit = outfitFromDefault(p.defaultWorn, p.wardrobe, settings().conditions);
+        writeCurrentRoster(null, { ...u, outfit, dressed: outfit.length > 0 });
+    }
+    updateAutoInjection();
+    toastr.success(`Saved ${c.name1}'s character.`, 'NPC Book');
+}
+
+function ensurePersonaButton() {
+    const holder = $('#persona_connections_buttons');
+    if (!holder.length || $('#npcb_persona_char').length) return;
+    const btn = $(`<div id="npcb_persona_char" class="menu_button menu_button_icon" title="NPC Book: wardrobe, starting outfit and sheets (e.g. GURPS) for the selected persona">
+        <i class="icon fa-solid fa-users-viewfinder fa-fw"></i><div>NPC Book</div></div>`);
+    holder.append(btn);
+    btn.on('click', () => openPersonaCharacter());
+}
+
+/** Open a sister-extension sheet (e.g. GURPS) of an NPC card in a popup; Save writes it to the card. */
+async function openTemplateExtSheet(id, extId) {
+    const c = ctx();
+    const t = lib()[id];
+    const x = extensions.get(extId);
+    if (!t || !x?.cardTab) return;
+    const data = clone(t.ext?.[extId] ?? (typeof x.defaultData === 'function' ? x.defaultData() : {}));
+    const box = $(`<div class="npcb-ext-popup"><div class="npcb-inst-head">${avatarHtml(t, t.name, 'npcb-ava-md')}<div><b>${esc(t.name)}</b><br><small class="npcb-dim">${esc(t.id)} · ${esc(x.cardTab.label || x.id)}</small></div></div><div class="npcb-ext-host"></div></div>`);
+    try { x.cardTab.render(box.find('.npcb-ext-host'), { data, template: t, isNew: false, kind: 'char' }); } catch (e) { console.error(e); }
+    const ok = await c.callGenericPopup(box, c.POPUP_TYPE.CONFIRM, '', { wide: true, large: true, allowVerticalScrolling: true, okButton: 'Save', cancelButton: 'Cancel' });
+    if (!ok) return;
+    const fresh = lib()[id];
+    if (!fresh) return;
+    fresh.ext = fresh.ext || {};
+    fresh.ext[extId] = data;
+    save();
+    updateAutoInjection();
+    if ($('#npcb_library').is(':visible') && libSelected === id) selectTemplate(id, false, `ext:${extId}`);
+    toastr.success(`Saved ${t.name}'s ${x.cardTab.label || x.id} sheet.`, 'NPC Book');
+}
+
+async function openPersonaExtSheet(extId) {
+    const c = ctx();
+    const x = extensions.get(extId);
+    if (!x?.personaSheet) return;
+    const p = personaData();
+    p.ext = p.ext || {};
+    const data = clone(p.ext[extId] ?? (typeof x.defaultData === 'function' ? x.defaultData() : {}));
+    const box = $(`<div class="npcb-ext-popup"><h3>${esc(c.name1)} — ${esc(x.personaSheet.label || x.id)}</h3><div class="npcb-ext-host"></div></div>`);
+    try { x.personaSheet.render(box.find('.npcb-ext-host'), { data, kind: 'user', name: c.name1 }); } catch (e) { console.error(e); }
+    const ok = await c.callGenericPopup(box, c.POPUP_TYPE.CONFIRM, '', { wide: true, large: true, allowVerticalScrolling: true, okButton: 'Save', cancelButton: 'Cancel' });
+    if (!ok) return;
+    p.ext[extId] = data;
+    save();
+    updateAutoInjection();
 }
 
 async function openPersonaWardrobe() {
@@ -1285,7 +1468,7 @@ async function openPersonaWardrobe() {
     const u = currentUser();
     let outfit = (u.outfit || []).filter(w => p.wardrobe.some(i => i.id === w.id));
     if (!outfit.length) outfit = outfitFromDefault(p.defaultWorn, p.wardrobe, settings().conditions);
-    writeCurrentRoster(null, { ...u, outfit });
+    writeCurrentRoster(null, { ...u, outfit, dressed: outfit.length > 0 });
 }
 
 // ───────────────────────── NPC Library (top bar) ─────────────────────────
@@ -1294,6 +1477,7 @@ let libSelected = null;
 let libIsNew = false;
 let libDraftPortrait = null;
 let libDraftWardrobe = null;
+let libDraftExt = {};
 
 function ensureTopButton() {
     if ($('#npcb_topbar').length) return;
@@ -1379,8 +1563,10 @@ function selectTemplate(id, isNew = false, tab = 'card') {
     const traitKeys = [...new Set([...s.traitKeys, ...Object.keys(t.traits || {})])];
     const present = hasChat() && !isNew && currentRoster().some(i => i.id === t.id);
     libDraftWardrobe = clone({ wardrobe: t.wardrobe || [], defaultWorn: t.defaultWorn || [] });
+    libDraftExt = clone(t.ext || {});
+    const extTabs = [...extensions.values()].filter(x => x.cardTab);
     ed.html(`
-      <div class="npcb-tabs"><div class="npcb-tab ${tab === 'card' ? 'active' : ''}" data-tab="card">Card</div><div class="npcb-tab ${tab === 'outfit' ? 'active' : ''}" data-tab="outfit">Starting outfit</div><div class="npcb-tab ${tab === 'wardrobe' ? 'active' : ''}" data-tab="wardrobe">Wardrobe (${(t.wardrobe || []).length})</div></div>
+      <div class="npcb-tabs"><div class="npcb-tab ${tab === 'card' ? 'active' : ''}" data-tab="card">Card</div><div class="npcb-tab ${tab === 'outfit' ? 'active' : ''}" data-tab="outfit">Starting outfit</div><div class="npcb-tab ${tab === 'wardrobe' ? 'active' : ''}" data-tab="wardrobe">Wardrobe (${(t.wardrobe || []).length})</div>${extTabs.map(x => `<div class="npcb-tab ${tab === `ext:${x.id}` ? 'active' : ''}" data-tab="ext:${esc(x.id)}">${esc(x.cardTab.label || x.id)}</div>`).join('')}</div>
       <div class="npcb-tabpane" data-pane="card" ${tab === 'card' ? '' : 'style="display:none"'}>
       <div class="npcb-ed-top">
         <div class="npcb-ed-portrait" title="Click to set portrait">${avatarHtml(t, t.name || '?', 'npcb-ava-lg')}</div>
@@ -1419,6 +1605,7 @@ function selectTemplate(id, isNew = false, tab = 'card') {
       <div class="npcb-tabpane" data-pane="wardrobe" ${tab === 'wardrobe' ? '' : 'style="display:none"'}>
         <div class="npcb-wd-host"></div>
       </div>
+      ${extTabs.map(x => `<div class="npcb-tabpane" data-pane="ext:${esc(x.id)}" ${tab === `ext:${x.id}` ? '' : 'style="display:none"'}><div class="npcb-ext-host" data-ext="${esc(x.id)}"></div></div>`).join('')}
       <div class="npcb-row npcb-ed-actions">
         <div class="menu_button npcb-ed-save"><i class="fa-solid fa-floppy-disk"></i> Save</div>
         ${isNew ? '' : `<div class="menu_button npcb-ed-scene">${present ? '<i class="fa-solid fa-user-minus"></i> Remove from scene' : '<i class="fa-solid fa-user-plus"></i> Add to scene'}</div>`}
@@ -1477,6 +1664,11 @@ function selectTemplate(id, isNew = false, tab = 'card') {
     );
     ed.on('click.npcb', '.npcb-tab[data-tab="wardrobe"]', () => mountWardrobeEditor(ed.find('.npcb-wd-host'), libDraftWardrobe));
     if (tab === 'outfit') mountStartOutfit();
+    for (const x of extTabs) {
+        const host = ed.find(`.npcb-ext-host[data-ext="${x.id}"]`);
+        if (!libDraftExt[x.id]) libDraftExt[x.id] = typeof x.defaultData === 'function' ? x.defaultData() : {};
+        try { x.cardTab.render(host, { data: libDraftExt[x.id], template: t, isNew, kind: 'char' }); } catch (e) { console.error(`[NPC Book] ${x.id} card tab failed`, e); host.text(`Error: ${e.message}`); }
+    }
     ed.on('click.npcb', '.npcb-ed-genimg', () => {
         toastr.info(`Generating a portrait for ${t.name}…`, 'NPC Book');
         ensurePortrait(t.id, { force: true });
@@ -1549,6 +1741,7 @@ async function saveTemplateFromEditor(t, isNew) {
         traits,
         color: color.toLowerCase(),
         wardrobe: (libDraftWardrobe?.wardrobe ?? t.wardrobe ?? []).filter(i => i.name.trim()),
+        ext: clone(libDraftExt || t.ext || {}),
         defaultWorn: (libDraftWardrobe?.defaultWorn ?? t.defaultWorn ?? []),
         auto: isNew ? false : !!t.auto,
         created: t.created || Date.now(),
@@ -1776,6 +1969,7 @@ async function mountSettings() {
     bind('#npcb_autocreate', 'autoCreate', 'checkbox');
     bind('#npcb_trackchar', 'trackChar', 'checkbox');
     bind('#npcb_trackuser', 'trackUser', 'checkbox');
+    bind('#npcb_personainuser', 'personaInUser', 'checkbox');
     bind('#npcb_dialoguecolors', 'dialogueColors', 'checkbox');
     bind('#npcb_speakerportraits', 'speakerPortraits', 'checkbox');
     bind('#npcb_speakersize', 'speakerPortraitSize', 'number');
@@ -1791,6 +1985,7 @@ async function mountSettings() {
     bind('#npcb_colorrule', 'colorRule');
     root.find('#npcb_reset_color').on('click', () => { s.colorRule = DEFAULT_COLOR_RULE; root.find('#npcb_colorrule').val(s.colorRule); save(); });
     bind('#npcb_trackoutfits', 'trackOutfits', 'checkbox');
+    bind('#npcb_exposure', 'describeExposure', 'checkbox');
     bind('#npcb_incwardrobe', 'includeWardrobe', 'checkbox');
     bind('#npcb_wdgrowth', 'allowWardrobeGrowth', 'checkbox');
     bind('#npcb_outfitrules', 'outfitRules');
@@ -1853,5 +2048,31 @@ jQuery(async () => {
     updateAutoInjection();
     observeChat();
     decorateAll();
+    ensurePersonaButton();
+    window.NPCBook = {
+        version: 2,
+        /**
+         * Register a sister extension.
+         * def = { id, label?, defaultData?(), cardTab?: { label, render(host, {data, template, isNew, kind}) },
+         *         personaSheet?: { label, icon?, render(host, {data, kind, name}) },
+         *         sceneXml?({kind, name, id, template, instance, data}) -> string,
+         *         instructions?({autoCreate}) -> string, fromTracker?(entry, template) -> data }
+         * Card/persona `data` objects are mutable drafts; NPC Book saves them when the user presses Save.
+         */
+        registerExtension(def) {
+            if (!def?.id) throw new Error('registerExtension: id required');
+            extensions.set(def.id, def);
+            if ($('#npcb_library').is(':visible') && (libSelected || libIsNew)) selectTemplate(libSelected, libIsNew);
+            updateAutoInjection();
+            console.log(`[NPC Book] extension registered: ${def.id}`);
+        },
+        getLibrary: () => lib(),
+        getTemplate: (id) => lib()[id] || null,
+        getPersonaData: (extId) => personaData().ext?.[extId] ?? null,
+        openPersonaCharacter,
+        saveSettings: save,
+        util: { esc, xa, xt, normalize, slugify, indent },
+    };
+    document.dispatchEvent(new CustomEvent('npcbook:ready', { detail: window.NPCBook }));
     console.log('[NPC Book] loaded');
 });
