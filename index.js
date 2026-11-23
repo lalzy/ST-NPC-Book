@@ -18,23 +18,29 @@ const INJECT_SCENE_KEY = 'npcbook_scene';
 const INJECT_INSTR_KEY = 'npcbook_instructions';
 const INJECT_REMIND_KEY = 'npcbook_speaker_reminder';
 
-const DEFAULT_INSTRUCTIONS = `[NPC Tracking]
-At the very end of EVERY reply, output one <npcs> block listing every character who is physically present in the scene at the end of your reply, except [[EXCLUDE]].
-- Characters who left the scene must be omitted. Characters who arrived must be added.
-- If nobody is present, output <npcs>[]</npcs>.
-- Reuse the exact "id" of a character already present, or listed under Known NPCs, ONLY if it is the same person (same identity: [[TRAIT_KEYS]]). Someone who merely shares a name is a different, NEW character.
-- For a character that is not present and not listed, add "new": true plus "description" (one line), "details" (full profile: appearance, personality, background, manner of speech), "height", "pronouns", "sexuality" and "sexual_experience".
-- Always include "traits" with: [[TRAIT_KEYS]].
-- "posture" must be one of: [[POSTURES]]
-- "state" must be one of: [[STATES]]
-- "feelings" is the character's private inner thoughts right now (1-2 sentences).
+const DEFAULT_INSTRUCTIONS = `[Scene tracking]
+Write your reply as usual. Then, at the very end, add one <npcs> block that records what CHANGED in the scene during your reply. Do not explain or plan the block; just write it.
+
+Put in the block:
+- A character already in the scene whose posture, state, feelings or clothing changed: their "id" and only the fields that changed.
+- A character who arrived: their "id" from Known NPCs, plus "posture" and "state". Someone not in Known NPCs (or a different person who shares a name) gets "name" and "new": true, plus "traits" with [[TRAIT_KEYS]] and the profile fields shown in the example.
+- A character who left: {"id": "...", "left": true}.
+- Leave out everyone and everything that did not change. If you are not sure something changed, leave it out. If nothing changed, write <npcs>[]</npcs>.
+- Never list [[EXCLUDE]].
+
+Values:
+- "posture" is one of: [[POSTURES]]
+- "state" is one of: [[STATES]]
+- "feelings" is the character's private thoughts right now, 1-2 sentences.
 [[SPEAKER_RULE]]
 [[OUTFIT_RULES]]
 
-Format:
+Example:
 <npcs>
 [
-  {"id": "existing_id", "name": "Name", "traits": {[[TRAIT_EXAMPLE]]}, "posture": "...", "state": "...", "feelings": "...", "outfit": {"wear": ["item_id"], "remove": ["item_id"]}}[[USER_EXAMPLE]]
+  {"id": "existing_id", "posture": "Sitting"},
+  {"id": "other_id", "left": true},
+  {"name": "Name", "new": true, "traits": {[[TRAIT_EXAMPLE]]}, "posture": "...", "state": "...", "feelings": "...", "description": "one line", "details": "appearance, personality, background, manner of speech", "height": "...", "pronouns": "...", "sexuality": "...", "sexual_experience": "..."}[[USER_EXAMPLE]]
 ]
 </npcs>
 
@@ -42,12 +48,12 @@ Known NPCs (id: name — identity):
 [[LIBRARY]]`;
 
 const DEFAULT_OUTFIT_RULES = `Clothing:
-- Each character may ONLY wear items from their own Wardrobe (listed with the scene). Never invent clothing for a character who has a wardrobe.
-- When someone's clothing changes, add "outfit": {"wear": ["item_id"], "remove": ["item_id"], "condition": {"item_id": "<condition>"}}. Leave "outfit" out when nothing changed. Putting an item on replaces whatever already occupies the same body slots.
-- Pick clothing that fits the situation (e.g. sleepwear for bed, then a day outfit after waking).
-- <wearing> is what each character has on RIGHT NOW. Its "exposure" (e.g. completely naked, topless, barefoot) is literal: describe and react to it accordingly.
-- "condition" must be one of: [[CONDITIONS]]
-- For a NEW character also add "wardrobe": 4-8 items that fit them, as [{"name": "...", "slots": ["..."]}], and "outfit": {"wear": ["item name", ...]} for what they wear right now. Slots: [[SLOTS]]`;
+- Characters only wear items from their own wardrobe (listed in the scene). Never invent clothing for someone who has a wardrobe.
+- When someone's clothing changes, add "outfit": {"wear": ["item_id"], "remove": ["item_id"], "condition": {"item_id": "<condition>"}} to their entry. Putting an item on replaces whatever is in the same slots.
+- Choose clothing that fits the situation, e.g. sleepwear in bed.
+- <wearing> is what each character has on right now. Its "exposure" (e.g. completely naked, topless, barefoot) is literal: describe and react to it accordingly.
+- "condition" is one of: [[CONDITIONS]]
+- A new character also gets "wardrobe": 4-8 fitting items as [{"name": "...", "slots": ["..."]}], and "outfit": {"wear": ["item name", ...]} for what they wear now. Slots: [[SLOTS]]`;
 
 const DEFAULT_SPEAKER_RULE = `Speaker blocks (mandatory in every reply):
 - Everything a character does or says goes inside <npc id="ID">...</npc>: their actions, the narration about them, and all of their dialogue. Use their exact id from the scene.
@@ -147,7 +153,7 @@ function pickColor() {
     return pool[Math.floor(Math.random() * pool.length)];
 }
 
-const DEFAULT_USER_RULE = `- Also add ONE entry {"id": "user", "posture": "..."} for [[USER]] (posture from the list above). Add "outfit" to it only when [[USER]]'s clothing changes, using items from [[USER]]'s Wardrobe. Never give [[USER]] a state or feelings.`;
+const DEFAULT_USER_RULE = `- When [[USER]]'s posture or clothing changes, add {"id": "user"} with only what changed ("posture" from the list above, "outfit" with items from [[USER]]'s wardrobe). Never give [[USER]] a state or feelings.`;
 
 const DEFAULTS = {
     enabled: true,
@@ -765,7 +771,8 @@ async function processLastMessage() {
                     }
                     postUser = u;
                 }
-                const r = applyTracker(ex.json.filter(e => !isUserEntry(e)), pre, {
+                // The block lists changes, so apply it to the scene as it stood before this text was written.
+                const r = applyTracker(ex.json.filter(e => !isUserEntry(e)), post, {
                     library: lib(),
                     threshold: s.threshold / 100,
                     numericTolerance: s.numericTolerance,
