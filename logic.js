@@ -425,3 +425,50 @@ export function outfitBySlot(outfit, wardrobe) {
     }
     return map;
 }
+
+// ───────────────────────── first-message character list ─────────────────────────
+
+/**
+ * Finds a starting-cast block in a greeting, e.g.
+ *   ```json
+ *   characters[ seraphina, sophia_housewife ]
+ *   ```
+ * Also accepts `characters: [...]`, `{"characters": [...]}`, quoted ids and names, with or without a code fence.
+ * Returns { found, refs: [string], cleaned }.
+ */
+export function extractCharacterList(text) {
+    const src = String(text ?? '');
+    const patterns = [
+        /```[a-z]*\s*\{?\s*"?characters"?\s*[:=]?\s*\[([\s\S]*?)\]\s*\}?\s*```/i,
+        /\{\s*"characters"\s*:\s*\[([\s\S]*?)\]\s*\}/i,
+        /(?:^|\n)[ \t]*characters\s*[:=]?\s*\[([^\]]*)\]/i,
+    ];
+    for (const re of patterns) {
+        const m = src.match(re);
+        if (!m) continue;
+        const refs = m[1].split(/[,\n]/).map(x => x.trim().replace(/^["'`]+|["'`]+$/g, '').trim()).filter(Boolean);
+        const cleaned = (src.slice(0, m.index) + src.slice(m.index + m[0].length)).replace(/\n{3,}/g, '\n\n').trim();
+        return { found: true, refs, cleaned };
+    }
+    return { found: false, refs: [], cleaned: src };
+}
+
+/** Resolve an id-or-name reference against the library (id first, then exact name). */
+export function resolveRef(ref, library) {
+    const lib = library || {};
+    const id = String(ref ?? '').trim().toLowerCase();
+    if (lib[id]) return id;
+    const n = normalize(ref);
+    const hit = Object.values(lib).find(t => normalize(t.name) === n);
+    return hit ? hit.id : null;
+}
+
+/** Normalise a CSS/HTML color to lowercase #rrggbb (or '' if unknown). */
+export function normColor(c) {
+    let v = String(c ?? '').trim().toLowerCase().replace(/^["']|["']$/g, '');
+    if (/^[0-9a-f]{6}$/.test(v) || /^[0-9a-f]{3}$/.test(v)) v = `#${v}`;
+    if (/^#[0-9a-f]{3}$/.test(v)) v = `#${v[1]}${v[1]}${v[2]}${v[2]}${v[3]}${v[3]}`;
+    const rgb = v.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+    if (rgb) v = `#${[rgb[1], rgb[2], rgb[3]].map(x => Number(x).toString(16).padStart(2, '0')).join('')}`;
+    return /^#[0-9a-f]{6}$/.test(v) ? v : '';
+}

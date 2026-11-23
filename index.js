@@ -3,6 +3,7 @@
 
 import {
     extractTracker, applyTracker, uniqueId, slugify, ID_PATTERN, normalize, pickEnum,
+    extractCharacterList, resolveRef, normColor,
     SLOTS, STACKING_SLOTS, applyOutfitChange, outfitFromDefault, outfitBySlot, wearItem, findItem, normOutfitChange, inferSlots,
 } from './logic.js';
 import { promptManager } from '../../../openai.js';
@@ -78,6 +79,10 @@ const DEFAULTS = {
     states: ['Calm', 'Happy', 'Excited', 'Curious', 'Nervous', 'Afraid', 'Angry', 'Sad', 'Tired', 'Injured', 'Asleep', 'Unconscious'],
     rosterCollapsed: false,
     trackUser: true,
+    speakerPortraits: true,
+    speakerPortraitSize: 56,
+    autoPortraits: true,
+    portraitPrompt: 'portrait of {{name}}, head and shoulders, {{traits}}, {{details}}',
     dialogueColors: true,
     colorRule: DEFAULT_COLOR_RULE,
     trackOutfits: true,
@@ -559,6 +564,231 @@ async function processLastMessage() {
     }
 }
 
+// ───────────────────────── first message: starting cast ─────────────────────────
+
+/** Reads a `characters[ id, id ]` block from the greeting(s) at the start of the chat and puts them in the scene. */
+async function processGreetings() {
+    const s = settings();
+    if (!s.enabled || !hasChat()) return;
+    const c = ctx();
+    const chat = c.chat || [];
+    let changed = false;
+    let carried = meta()?.base ?? [];
+    for (let i = 0; i < chat.length; i++) {
+        const msg = chat[i];
+        if (msg.is_user) break;
+        if (msg.is_system) continue;
+        const texts = Array.isArray(msg.swipes) && msg.swipes.length ? msg.swipes : [msg.mes];
+        const cur = msg.swipe_id ?? 0;
+        let msgChanged = false;
+        for (let k = 0; k < texts.length; k++) {
+            const ex = extractCharacterList(texts[k]);
+            if (!ex.found) continue;
+            const roster = clone(carried);
+            const missing = [];
+            for (const ref of ex.refs) {
+                const id = resolveRef(ref, lib());
+                if (!id) { missing.push(ref); continue; }
+                if (roster.some(x => x.id === id)) continue;
+                const t = lib()[id];
+                roster.push({ id, name: t.name, posture: s.postures[0] ?? '', state: s.states[0] ?? '', feelings: '', outfit: outfitFromDefault(t.defaultWorn, t.wardrobe || [], s.conditions) });
+            }
+            if (missing.length) toastr.warning(`Not in the NPC Library: ${missing.join(', ')}`, 'NPC Book');
+            const user = currentUser();
+            const snap = { pre: clone(carried), post: clone(roster), preUser: clone(user), postUser: clone(user), raw: null, sig: sig(ex.cleaned), greeting: true };
+            if (Array.isArray(msg.swipes) && msg.swipes.length) msg.swipes[k] = ex.cleaned;
+            if (Array.isArray(msg.swipe_info)) {
+                msg.swipe_info[k] = msg.swipe_info[k] || {};
+                msg.swipe_info[k].extra = msg.swipe_info[k].extra || {};
+                msg.swipe_info[k].extra[MODULE] = clone(snap);
+            }
+            if (k === cur) {
+                msg.mes = ex.cleaned;
+                msg.extra = msg.extra || {};
+                msg.extra[MODULE] = snap;
+            }
+            msgChanged = true;
+        }
+        if (msgChanged) {
+            changed = true;
+            try { c.updateMessageBlock(i, msg); } catch (e) { /* not rendered yet */ }
+        }
+        const sn = snapOf(msg);
+        if (sn?.post) carried = sn.post;
+    }
+    if (changed) {
+        await c.saveChat?.();
+        renderRoster();
+        decorateAll();
+    }
+}
+
+// ───────────────────────── portraits ─────────────────────────
+
+const portraitTried = new Set();
+let portraitBusy = false;
+const portraitQueue = [];
+
+function imageGenAvailable() {
+    const c = ctx();
+    const disabled = c.extensionSettings?.disabledExtensions || [];
+    if (disabled.includes('stable-diffusion')) return false;
+    return !!c.SlashCommandParser?.commands?.imagine;
+}
+
+function portraitPromptFor(t) {
+    const s = settings();
+    const clean = (x) => String(x ?? '').replace(/[|{}"\n\r]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return clean(String(s.portraitPrompt || '')
+        .replaceAll('{{name}}', t.name)
+        .replaceAll('{{traits}}', traitSummary(t))
+        .replaceAll('{{details}}', String(t.details || '').slice(0, 400)));
+}
+
+/** Queue an image-generation run for an NPC without a portrait (only if the Image Generation extension is active). */
+function ensurePortrait(id, { force = false } = {}) {
+    const s = settings();
+    const t = lib()[id];
+    if (!t || t.portrait) return;
+    if (!force && (!s.autoPortraits || portraitTried.has(id))) return;
+    if (!imageGenAvailable()) { if (force) toastr.warning('Image Generation extension is not active.', 'NPC Book'); return; }
+    portraitTried.add(id);
+    if (!portraitQueue.includes(id)) portraitQueue.push(id);
+    runPortraitQueue();
+}
+
+async function runPortraitQueue() {
+    if (portraitBusy) return;
+    portraitBusy = true;
+    try {
+        while (portraitQueue.length) {
+            const id = portraitQueue.shift();
+            const t = lib()[id];
+            if (!t || t.portrait) continue;
+            try {
+                const prompt = portraitPromptFor(t);
+                const res = await ctx().executeSlashCommandsWithOptions(`/imagine quiet=true gallery=false extend=false edit=false "${prompt}"`, { handleParserErrors: false, handleExecutionErrors: false });
+                const url = String(res?.pipe ?? '').trim();
+                if (url && lib()[id]) {
+                    lib()[id].portrait = url.startsWith('/') || url.startsWith('data:') || url.startsWith('http') ? url : `/${url}`;
+                    save();
+                    renderRoster();
+                    renderLibraryList();
+                    decorateAll();
+                    if (libSelected === id && !libIsNew) $('#npcb_library .npcb-ed-portrait').html(avatarHtml(lib()[id], lib()[id].name, 'npcb-ava-lg'));
+                }
+            } catch (e) {
+                console.warn('[NPC Book] portrait generation failed', e);
+            }
+        }
+    } finally {
+        portraitBusy = false;
+    }
+}
+
+// ───────────────────────── speaker portraits in messages ─────────────────────────
+
+/** Map dialogue colour -> NPC id, preferring characters present at that message. */
+function colorMap(presentIds) {
+    const map = new Map();
+    const all = Object.values(lib()).filter(t => normColor(t.color));
+    all.sort((a, b) => (presentIds.includes(b.id) - presentIds.includes(a.id)));
+    for (const t of all) { const k = normColor(t.color); if (!map.has(k)) map.set(k, t.id); }
+    return map;
+}
+
+function rosterAtMessage(idx) {
+    const chat = ctx().chat || [];
+    for (let i = Math.min(idx, chat.length - 1); i >= 0; i--) {
+        const sn = snapOf(chat[i]);
+        if (sn && Array.isArray(sn.post)) return i === idx && sn.pre ? [...new Set([...sn.pre, ...sn.post].map(x => x.id))] : sn.post.map(x => x.id);
+    }
+    return [];
+}
+
+function speakerOfBlock(block, cmap) {
+    const els = block.querySelectorAll('font[color], [style*="color"]');
+    for (const el of els) {
+        if (el.closest('.npcb-speaker')) continue;
+        const col = normColor(el.getAttribute('color') || el.style?.color);
+        if (col && cmap.has(col)) return cmap.get(col);
+    }
+    return null;
+}
+
+function decorateMessage(mesid) {
+    const s = settings();
+    const mesEl = document.querySelector(`#chat .mes[mesid="${mesid}"]`);
+    if (!mesEl) return;
+    const textEl = mesEl.querySelector('.mes_text');
+    if (!textEl) return;
+    const msg = (ctx().chat || [])[Number(mesid)];
+    const enabled = s.enabled && s.speakerPortraits && msg && !msg.is_user;
+    const blocks = Array.from(textEl.children).filter(el => !el.classList.contains('npcb-speaker') && /^(P|DIV|BLOCKQUOTE|LI|UL|OL)$/.test(el.tagName));
+    const cmap = enabled ? colorMap(rosterAtMessage(Number(mesid))) : new Map();
+    let last = null;
+    for (const block of blocks) {
+        let want = null;
+        if (enabled) {
+            const sp = speakerOfBlock(block, cmap);
+            if (sp && sp !== last) want = sp;
+            if (sp) last = sp;
+        }
+        const t = want ? lib()[want] : null;
+        if (want && !t?.portrait) ensurePortrait(want);
+        const url = t?.portrait || '';
+        const existing = block.querySelector(':scope > img.npcb-speaker');
+        if (!url) {
+            if (existing) { existing.remove(); block.classList.remove('npcb-has-speaker'); }
+            continue;
+        }
+        if (existing && existing.dataset.npc === want && existing.getAttribute('src') === url) continue;
+        existing?.remove();
+        const img = document.createElement('img');
+        img.className = 'npcb-speaker';
+        img.dataset.npc = want;
+        img.src = url;
+        img.alt = t.name;
+        img.title = t.name;
+        img.style.width = img.style.height = `${Number(s.speakerPortraitSize) || 56}px`;
+        if (normColor(t.color)) img.style.borderColor = t.color;
+        block.insertBefore(img, block.firstChild);
+        block.classList.add('npcb-has-speaker');
+    }
+}
+
+function decorateAll() {
+    document.querySelectorAll('#chat .mes[mesid]').forEach(el => decorateMessage(el.getAttribute('mesid')));
+}
+
+const pendingDecorate = new Set();
+let decorateTimer = null;
+function scheduleDecorate(mesid) {
+    if (mesid === undefined || mesid === null) return;
+    pendingDecorate.add(String(mesid));
+    clearTimeout(decorateTimer);
+    decorateTimer = setTimeout(() => {
+        const ids = [...pendingDecorate];
+        pendingDecorate.clear();
+        ids.forEach(decorateMessage);
+    }, 150);
+}
+
+function observeChat() {
+    const chatEl = document.getElementById('chat');
+    if (!chatEl || chatEl.dataset.npcbObserved) return;
+    chatEl.dataset.npcbObserved = '1';
+    new MutationObserver((muts) => {
+        for (const m of muts) {
+            const nodes = [...m.addedNodes];
+            if (nodes.length && nodes.every(n => n.nodeType === 1 && n.classList?.contains('npcb-speaker'))) continue;
+            const mes = (m.target.nodeType === 1 ? m.target : m.target.parentElement)?.closest?.('.mes[mesid]');
+            if (mes) scheduleDecorate(mes.getAttribute('mesid'));
+            for (const n of nodes) if (n.nodeType === 1 && n.matches?.('.mes[mesid]')) scheduleDecorate(n.getAttribute('mesid'));
+        }
+    }).observe(chatEl, { childList: true, subtree: true });
+}
+
 // ───────────────────────── roster bar ─────────────────────────
 
 function ensureRosterBar() {
@@ -590,6 +820,7 @@ function renderRoster() {
     bar.find('.npcb-roster-count').text(roster.length ? `(${roster.length})` : '');
     const cards = roster.map(inst => {
         const t = templateFor(inst);
+        if (t && !t.portrait) ensurePortrait(t.id);
         const name = t?.name ?? inst.name ?? inst.id;
         const sub = [inst.posture, inst.state].filter(Boolean).join(' · ');
         return `<div class="npcb-card" data-id="${esc(inst.id)}" title="${esc(name)}${inst.feelings ? `\n💭 ${esc(inst.feelings)}` : ''}">
@@ -1004,6 +1235,7 @@ function selectTemplate(id, isNew = false, tab = 'card') {
           <div class="npcb-row npcb-ed-portrait-btns">
             <div class="menu_button npcb-ed-setimg"><i class="fa-solid fa-image"></i> Portrait</div>
             <div class="menu_button npcb-ed-clrimg"><i class="fa-solid fa-trash-can"></i></div>
+            ${isNew ? '' : '<div class="menu_button npcb-ed-genimg" title="Generate with the Image Generation extension"><i class="fa-solid fa-wand-magic-sparkles"></i> Generate</div>'}
           </div>
         </div>
       </div>
@@ -1039,6 +1271,11 @@ function selectTemplate(id, isNew = false, tab = 'card') {
             libDraftPortrait = await resizeImage(file, 512);
             ed.find('.npcb-ed-portrait').html(`<img class="npcb-ava npcb-ava-lg" src="${libDraftPortrait}">`);
         } catch (err) { toastr.error('Could not read image.', 'NPC Book'); }
+    });
+    ed.on('click.npcb', '.npcb-ed-genimg', () => {
+        if (lib()[t.id]?.portrait) { toastr.info('Clear the current portrait first (trash button), then Save.', 'NPC Book'); return; }
+        toastr.info(`Generating a portrait for ${t.name}…`, 'NPC Book');
+        ensurePortrait(t.id, { force: true });
     });
     ed.on('click.npcb', '.npcb-ed-clrimg', () => {
         libDraftPortrait = '';
@@ -1236,6 +1473,11 @@ async function mountSettings() {
     bind('#npcb_trackchar', 'trackChar', 'checkbox');
     bind('#npcb_trackuser', 'trackUser', 'checkbox');
     bind('#npcb_dialoguecolors', 'dialogueColors', 'checkbox');
+    bind('#npcb_speakerportraits', 'speakerPortraits', 'checkbox');
+    bind('#npcb_speakersize', 'speakerPortraitSize', 'number');
+    bind('#npcb_autoportraits', 'autoPortraits', 'checkbox');
+    bind('#npcb_portraitprompt', 'portraitPrompt');
+    root.find('#npcb_speakerportraits, #npcb_speakersize').on('input change', () => decorateAll());
     bind('#npcb_colorrule', 'colorRule');
     root.find('#npcb_reset_color').on('click', () => { s.colorRule = DEFAULT_COLOR_RULE; root.find('#npcb_colorrule').val(s.colorRule); save(); });
     bind('#npcb_trackoutfits', 'trackOutfits', 'checkbox');
@@ -1282,11 +1524,13 @@ jQuery(async () => {
 
     const { eventSource, eventTypes } = ctx();
     eventSource.on(eventTypes.GENERATION_STARTED, onGenerationStarted);
-    eventSource.on(eventTypes.MESSAGE_RECEIVED, () => processLastMessage());
+    eventSource.on(eventTypes.MESSAGE_RECEIVED, (id, type) => { if (type === 'first_message') processGreetings(); else processLastMessage(); });
     const finish = () => setTimeout(() => processLastMessage(), 0);
     eventSource.on(eventTypes.GENERATION_ENDED, finish);
     eventSource.on(eventTypes.GENERATION_STOPPED, finish);
-    eventSource.on(eventTypes.CHAT_CHANGED, () => { genCtx = null; closePopovers(); renderRoster(); renderLibraryList(); updateAutoInjection(); });
+    eventSource.on(eventTypes.CHAT_CHANGED, () => { genCtx = null; closePopovers(); renderRoster(); renderLibraryList(); updateAutoInjection(); processGreetings(); setTimeout(decorateAll, 300); });
+    eventSource.on(eventTypes.MESSAGE_EDITED, (id) => { const m = ctx().chat?.[id]; if (m && !m.is_user && (ctx().chat.slice(0, id).every(x => !x.is_user))) processGreetings(); });
+    eventSource.on(eventTypes.MORE_MESSAGES_LOADED, () => setTimeout(decorateAll, 100));
     for (const ev of [eventTypes.MESSAGE_SWIPED, eventTypes.MESSAGE_DELETED, eventTypes.MESSAGE_EDITED]) {
         eventSource.on(ev, () => { renderRoster(); updateAutoInjection(); });
     }
@@ -1297,5 +1541,7 @@ jQuery(async () => {
 
     renderRoster();
     updateAutoInjection();
+    observeChat();
+    decorateAll();
     console.log('[NPC Book] loaded');
 });

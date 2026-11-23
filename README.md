@@ -42,3 +42,19 @@ Paperdoll slots: Head, Neck, Cover, Upper (outer/inner), Hands, Waist, Lower (ou
 
 ## Dialogue colors
 Each NPC card has a **Dialogue color** (#RRGGBB). While the NPC is in the scene, the prompt tells the LLM to wrap that character's spoken lines in `<font color=#RRGGBB>"..."</font>`. New cards get a free color from a palette, and NPCs the LLM creates get one automatically. Clear the field to give a character no color. The rule text is editable in settings (`[[COLOR_RULE]]`).
+
+## Starting cast in the first message
+Put a list of NPC IDs or names in a character's greeting (or an alternate greeting):
+
+````
+```json
+characters[
+  seraphina, sophia_housewife
+]
+```
+````
+
+`characters: [Seraphina, Bob]` without the code fence also works. When the chat starts, those NPCs are put in the scene wearing their default outfits, and the block is removed from the message. Each alternate greeting can have its own cast. Names that aren't in the NPC Library are reported in a warning.
+
+## Speaker portraits
+In AI messages, each paragraph with dialogue in an NPC's dialogue color gets that NPC's portrait at its start. The portrait appears only when the speaker changes. If an NPC has no portrait and the Image Generation extension is active, one is generated once (prompt editable in settings). A **Generate** button on the card does the same on demand.

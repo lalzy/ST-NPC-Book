@@ -79,6 +79,13 @@
             <div class="menu_button" id="npcb_reset_color"><i class="fa-solid fa-rotate-left"></i> Reset color rule</div>
 
             <hr>
+            <h4>Portraits</h4>
+            <label class="checkbox_label"><input type="checkbox" id="npcb_speakerportraits"> Show the speaker's portrait next to their dialogue (matched by dialogue color)</label>
+            <label>Portrait size (px)<input id="npcb_speakersize" type="number" min="24" max="200" class="text_pole"></label>
+            <label class="checkbox_label"><input type="checkbox" id="npcb_autoportraits"> Generate missing portraits with the Image Generation extension (only if it is active)</label>
+            <label>Portrait prompt (<code>{{name}}</code> <code>{{traits}}</code> <code>{{details}}</code>)<input id="npcb_portraitprompt" class="text_pole"></label>
+
+            <hr>
             <h4>You &amp; clothing</h4>
             <label class="checkbox_label"><input type="checkbox" id="npcb_trackuser"> Track me (persona): posture + outfit, shown left of the scene</label>
             <label class="checkbox_label"><input type="checkbox" id="npcb_trackoutfits"> Track outfits (paperdoll + wardrobe)</label>
