@@ -35,31 +35,42 @@ Using Text Completion? There is no Prompt Manager there, so set **Mode** to *Aut
 
 ## Using it
 
-**Making NPCs.** The top-bar button opens your NPC Library. Each NPC gets a name, portrait, a description (only you see it), details (what the AI gets to know), a wardrobe and a dialogue color.
+**NPC Library.** The top-bar button opens your NPCs. Each card has a name, portrait, dialogue color, wardrobe, a private description (only you see it) and details plus a profile (height, pronouns, sexuality…) that the AI is told.
 
-**The scene bar.** Above the chat box you'll see who is currently in the scene, with yourself on the far left. The AI adds and removes characters as the story moves along. You can also add someone with the **+** button, or click a character to change their posture, mood, thoughts or outfit yourself.
+**Scene bar.** Shown above the chat box: you on the left, then everyone currently in the scene. The AI adds and removes characters as the story moves. Use **+** to add someone yourself, or click a character to change their posture, mood, thoughts or outfit.
 
-**Clothing.** Each NPC (and your persona) has a wardrobe. The AI can only dress characters from their own wardrobe, so no surprise outfits appear out of nowhere. Click a character and open the **Outfit** tab to change what they're wearing.
+**Clothing.** NPCs and your persona each have a wardrobe, and the AI can only dress them from it. To change what someone wears, click them and open **Outfit**. Set up your own wardrobe under **Persona Management** → **Connections** → **NPC Book**.
 
-**Your persona.** Go to **Persona Management** → **Connections** → **NPC Book** to set up your own wardrobe and starting outfit.
+**New characters.** When the AI introduces someone without a card, NPC Book creates one with details and a wardrobe. Characters with the same name but a different age or role are kept as separate people.
 
-**New characters.** When the AI introduces someone you haven't made, NPC Book creates a card for them automatically, complete with details and a wardrobe. Two characters with the same name but different ages or roles are kept apart.
+**Starting cast.** Put a `characters` block in a greeting or an alternate greeting. The block is removed from the message, and the characters are in the scene from the first message:
 
-**Starting a scene with characters.** Put a list in a greeting (or alternate greeting) and they'll be in the scene from the first message:
-
-````
 ```json
-characters[
-  seraphina, sophia_housewife
-]
+{
+  "characters": [
+    {"id": "seraphina"},
+    {"id": "suzie", "posture": "sitting", "clothing": {"bottom-outer": "jeans"}},
+    {"id": "user", "posture": "lying down"}
+  ]
+}
 ```
-````
 
-**Dialogue colors and portraits.** Each NPC's lines are colored in their own color, and their portrait shows up next to their dialogue. Click a portrait on the NPC card to load an image from your device or from the SillyTavern server, crop it, or generate one with SillyTavern's Image Generation extension.
+Each character starts from their card. Any field you add overrides the card for that greeting only:
 
-**Swipes.** Swiping or deleting a message also rolls the scene back to how it was at that point.
+| Field | Example |
+|---|---|
+| `posture` | `"sitting"` |
+| `mood` | `"nervous"` |
+| `feelings` | `"Who is that?"` |
+| `clothing` | `{"bottom-outer": "jeans", "feet": "none"}`: set or empty a slot (other slots keep the default outfit)<br>`["nothing", "pajamas (wet)"]`: undress, then put these on, with an optional condition in brackets<br>`"nothing"`: naked |
 
-**Settings.** Everything can be adjusted under **Extensions** → **NPC Book**: the postures, moods and clothing conditions the AI can choose from, the prompts it receives, and which features are switched on.
+Item names are matched loosely, so `"jeans"` finds "Blue Jeans". An item that isn't in the wardrobe is added to it. Use `"id": "user"` to set your own starting posture and clothing.
+
+**Dialogue colors and portraits.** Each NPC's lines appear in their color, with their portrait beside them. Click the portrait on a card to upload an image, pick one from the SillyTavern server, crop it, or generate one with the Image Generation extension.
+
+**Swipes.** Swiping or deleting a message rolls the scene back to that point.
+
+**Settings.** Under **Extensions** → **NPC Book** you can set the postures, moods and clothing conditions the AI can choose from, edit the prompts it receives, and turn features on or off.
 
 ## Sister extensions
 NPC Book can be extended by other extensions, which can add their own tabs to NPC cards and your persona, and their own information to what the AI sees. See *NPC Book — GURPS* for an example.

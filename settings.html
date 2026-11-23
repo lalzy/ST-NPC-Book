@@ -63,6 +63,21 @@
             <label class="checkbox_label"><input type="checkbox" id="npcb_include_lib"> List known NPCs (id, name, identity) in the instructions</label>
 
             <hr>
+            <h4>Intro cast (character card greeting)</h4>
+            <small>Put a JSON block in a greeting to set who is in the opening scene. It is removed from the visible message. Each NPC starts from their card (default outfit, first posture and state); any other field overrides that for this greeting only. The block must be valid JSON.</small>
+            <pre class="npcb-pre">```json
+{
+  "characters": [
+    {"id": "suzie", "posture": "sitting", "clothing": {"bottom-outer": "jeans"}},
+    {"id": "bob", "mood": "nervous", "feelings": "Who is that?"},
+    {"id": "tom"},
+    {"id": "user", "posture": "lying down"}
+  ]
+}
+```</pre>
+            <small>Fields: <b>posture</b>, <b>state</b>/<b>mood</b>, <b>feelings</b>, <b>clothing</b>. Clothing: a slot map (<code>{"bottom-outer": "jeans", "feet": "none"}</code>), a list to put on (<code>["jeans", "white shirt (wet)"]</code>; start it with <code>"nothing"</code> to undress first), or <code>"nothing"</code>. Slot keys also work directly (<code>{"id": "suzie", "feet": "none"}</code>). Items are matched loosely ("jeans" finds "Blue Jeans"); items not in the wardrobe are added to it. <code>"id": "user"</code> sets your own posture/clothing.</small>
+
+            <hr>
             <h4>Matching &amp; creation</h4>
             <small>An NPC reported by the LLM is the same as a saved one only when (1) its ID or Name matches exactly, and (2) its identity data matches at least the threshold below. Otherwise a new NPC card is created.</small>
             <label class="checkbox_label"><input type="checkbox" id="npcb_autocreate"> Create a new NPC card when no match is found</label>

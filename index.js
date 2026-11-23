@@ -3,7 +3,7 @@
 
 import {
     extractTracker, applyTracker, uniqueId, slugify, ID_PATTERN, normalize, pickEnum,
-    extractCharacterList, resolveRef, normColor, exposureSummary,
+    extractCharacterList, resolveRef, normColor, exposureSummary, applyCastOverrides,
     defaultPronouns, PROFILE_FIELDS,
     SLOTS, applyOutfitChange, outfitFromDefault, outfitBySlot, wearItem, findItem, normOutfitChange, inferSlots,
 } from './logic.js';
@@ -22,7 +22,7 @@ At the very end of EVERY reply, output one <npcs> block listing every character 
 - Characters who left the scene must be omitted. Characters who arrived must be added.
 - If nobody is present, output <npcs>[]</npcs>.
 - Reuse the exact "id" of a character already present, or listed under Known NPCs, ONLY if it is the same person (same identity: [[TRAIT_KEYS]]). Someone who merely shares a name is a different, NEW character.
-- For a character that is not present and not listed, add "new": true plus "description" (one line), "details" (full profile: appearance, personality, background, manner of speech), "height", "pronouns" and "sexual_experience".
+- For a character that is not present and not listed, add "new": true plus "description" (one line), "details" (full profile: appearance, personality, background, manner of speech), "height", "pronouns", "sexuality" and "sexual_experience".
 - Always include "traits" with: [[TRAIT_KEYS]].
 - "posture" must be one of: [[POSTURES]]
 - "state" must be one of: [[STATES]]
@@ -382,6 +382,7 @@ function profileOf(t) {
     return {
         height: String(t?.height ?? '').trim(),
         pronouns: String(t?.pronouns ?? '').trim() || defaultPronouns(t?.traits?.gender),
+        sexuality: String(t?.sexuality ?? '').trim(),
         sexualExperience: String(t?.sexualExperience ?? '').trim(),
     };
 }
@@ -649,7 +650,7 @@ function newInstance(id) {
 
 /**
  * Starting cast for regenerating a greeting: the given roster, plus the cast read from the greeting's
- * characters[...] block (any swipe), plus the main character card when "Track the main character" is on.
+ * "characters" block (any swipe), plus the main character card when "Track the main character" is on.
  */
 function greetingCast(idx, base) {
     const s = settings();
@@ -724,7 +725,6 @@ async function processLastMessage() {
                         const oc = applyOutfitChange(u.outfit, p.wardrobe, normOutfitChange(userEntry), s.conditions);
                         u.outfit = oc.outfit;
                         if (userEntry.outfit || userEntry.wear) u.dressed = true;
-                        if (oc.rejected.length) console.debug('[NPC Book] user outfit items not in wardrobe:', oc.rejected);
                     }
                     postUser = u;
                 }
@@ -757,7 +757,6 @@ async function processLastMessage() {
                     renderLibraryList();
                 }
                 post = r.roster;
-                console.debug('[NPC Book] tracker', r.log);
             } else {
                 console.warn('[NPC Book] could not parse tracker block:', ex.error, ex.raw);
                 toastr.warning('Could not parse the <npcs> block; scene left unchanged.', 'NPC Book');
@@ -790,7 +789,10 @@ async function processLastMessage() {
 
 // ───────────────────────── first message: starting cast ─────────────────────────
 
-/** Reads a `characters[ id, id ]` block from the greeting(s) at the start of the chat and puts them in the scene. */
+/**
+ * Reads a `{"characters": [{"id": ..., overrides}]}` JSON block from the greeting(s) at the start of the chat and puts them in the scene.
+ * Overrides (posture, state, feelings, clothing / slot keys) replace the card defaults for this intro only.
+ */
 async function processGreetings() {
     const s = settings();
     if (!s.enabled || !hasChat()) return;
@@ -798,6 +800,7 @@ async function processGreetings() {
     const chat = c.chat || [];
     let changed = false;
     let carried = meta()?.base ?? [];
+    const notes = { missing: new Set(), added: [], warnings: new Set(), errors: new Set() };
     for (let i = 0; i < chat.length; i++) {
         const msg = chat[i];
         if (msg.is_user) break;
@@ -808,18 +811,11 @@ async function processGreetings() {
         for (let k = 0; k < texts.length; k++) {
             const ex = extractCharacterList(texts[k]);
             if (!ex.found) continue;
-            const roster = clone(carried);
-            const missing = [];
-            for (const ref of ex.refs) {
-                const id = resolveRef(ref, lib());
-                if (!id) { missing.push(ref); continue; }
-                if (roster.some(x => x.id === id)) continue;
-                const t = lib()[id];
-                roster.push({ id, name: t.name, posture: s.postures[0] ?? '', state: s.states[0] ?? '', feelings: '', outfit: outfitFromDefault(t.defaultWorn, t.wardrobe || [], s.conditions) });
-            }
-            if (missing.length) toastr.warning(`Not in the NPC Library: ${missing.join(', ')}`, 'NPC Book');
-            const user = currentUser();
-            const snap = { pre: clone(carried), post: clone(roster), preUser: clone(user), postUser: clone(user), raw: null, sig: sig(ex.cleaned), greeting: true };
+            if (ex.error) { console.warn('[NPC Book] intro cast block:', ex.error); notes.errors.add(ex.error); }
+            if (ex.cleaned === texts[k]) continue; // block could not be read and was left in place
+            const preUser = userBefore(i);
+            const cast = applyIntroCast(ex.entries, carried, preUser, notes);
+            const snap = { pre: clone(carried), post: clone(cast.roster), preUser: clone(preUser), postUser: clone(cast.user), raw: null, sig: sig(ex.cleaned), greeting: true };
             if (Array.isArray(msg.swipes) && msg.swipes.length) msg.swipes[k] = ex.cleaned;
             if (Array.isArray(msg.swipe_info)) {
                 msg.swipe_info[k] = msg.swipe_info[k] || {};
@@ -840,11 +836,60 @@ async function processGreetings() {
         const sn = snapOf(msg);
         if (sn?.post) carried = sn.post;
     }
+    if (notes.missing.size) toastr.warning(`Not in the NPC Library: ${[...notes.missing].join(', ')}`, 'NPC Book');
+    if (notes.errors.size) toastr.error(`Could not read the intro characters block: ${[...notes.errors].join('; ')}`, 'NPC Book');
+    if (notes.warnings.size) {
+        console.warn('[NPC Book] intro cast:', [...notes.warnings]);
+        toastr.warning([...notes.warnings].map(esc).join('<br>'), 'NPC Book: intro cast', { escapeHtml: false });
+    }
+    if (notes.added.length) {
+        save();
+        toastr.info(`Added to wardrobe: ${notes.added.join('; ')}`, 'NPC Book');
+    }
     if (changed) {
         await c.saveChat?.();
         renderRoster();
         decorateAll();
     }
+}
+
+function isUserRef(ref) {
+    const n = normalize(ref);
+    const name1 = normalize(ctx().name1);
+    return ['user', 'you', 'persona'].includes(n) || (!!name1 && n === name1 && !lib()[String(ref).trim().toLowerCase()]);
+}
+
+/**
+ * Build the scene for an intro message from its cast entries [{ref, overrides}].
+ * Each NPC starts from its card (default outfit, first posture/state); overrides replace parts of that.
+ * Clothing named in an override but missing from the wardrobe is added to the card's wardrobe.
+ */
+function applyIntroCast(entries, carried, user, notes) {
+    const s = settings();
+    const opts = { postures: s.postures, states: s.states, conditions: s.conditions };
+    const roster = clone(carried);
+    let u = clone(user);
+    for (const e of entries || []) {
+        if (isUserRef(e.ref)) {
+            const p = personaData();
+            const r = applyCastOverrides({ posture: u.posture, outfit: u.outfit || [] }, e.overrides, { ...opts, wardrobe: p.wardrobe });
+            const outfitChanged = JSON.stringify(r.instance.outfit) !== JSON.stringify(u.outfit || []);
+            u = { ...u, posture: r.instance.posture, outfit: r.instance.outfit, dressed: u.dressed || outfitChanged };
+            if (r.added.length) { p.wardrobe = r.wardrobe; notes.added.push(`${ctx().name1}: ${r.added.map(x => x.name).join(', ')}`); }
+            r.warnings.forEach(w => notes.warnings.add(`${ctx().name1}: ${w}`));
+            continue;
+        }
+        const id = resolveRef(e.ref, lib());
+        if (!id) { notes.missing.add(e.ref); continue; }
+        const t = lib()[id];
+        let inst = roster.find(x => x.id === id);
+        if (!inst) { inst = newInstance(id); roster.push(inst); }
+        const r = applyCastOverrides(inst, e.overrides, { ...opts, wardrobe: t.wardrobe || [] });
+        Object.assign(inst, r.instance);
+        if (r.added.length) { t.wardrobe = r.wardrobe; notes.added.push(`${t.name}: ${r.added.map(x => x.name).join(', ')}`); }
+        r.warnings.forEach(w => notes.warnings.add(`${t.name}: ${w}`));
+    }
+    return { roster, user: u };
 }
 
 // ───────────────────────── portraits ─────────────────────────
@@ -953,7 +998,6 @@ async function portraitPromptFor(t) {
     ].filter(x => typeof x === 'string').join('\n');
     const answer = await ctx().generateRaw({ systemPrompt: system, prompt: `${data}\n\nFollow the instructions and output only the final line.` });
     const line = framePortrait(cleanForImagine(extractTagLine(answer)));
-    console.debug('[NPC Book] portrait prompt for', t.id, '→', line);
     return line;
 }
 
@@ -1649,6 +1693,7 @@ function selectTemplate(id, isNew = false, tab = 'card') {
         <div><b>Profile</b> <small class="npcb-dim">(sent to the LLM; not used for matching)</small></div>
         <label>Height<input class="text_pole npcb-ed-height" value="${esc(t.height ?? '')}" placeholder="e.g. 170 cm, tall"></label>
         <label>Pronouns<input class="text_pole npcb-ed-pronouns" value="${esc(String(t.pronouns ?? '').trim() || defaultPronouns(t.traits?.gender))}" data-auto="${String(t.pronouns ?? '').trim() ? '0' : '1'}" placeholder="he/him, she/her, they/them"></label>
+        <label>Sexuality<input class="text_pole npcb-ed-sexuality" value="${esc(t.sexuality ?? '')}" placeholder="e.g. heterosexual, bisexual, gay, asexual"></label>
         <label>Sexual experience<input class="text_pole npcb-ed-sexexp" value="${esc(t.sexualExperience ?? '')}" placeholder="e.g. virgin, experienced"></label>
       </div>
       </div>
@@ -1801,6 +1846,7 @@ async function saveTemplateFromEditor(t, isNew) {
         traits,
         height: String(ed.find('.npcb-ed-height').val() ?? '').trim(),
         pronouns: String(ed.find('.npcb-ed-pronouns').val() ?? '').trim(),
+        sexuality: String(ed.find('.npcb-ed-sexuality').val() ?? '').trim(),
         sexualExperience: String(ed.find('.npcb-ed-sexexp').val() ?? '').trim(),
         color: color.toLowerCase(),
         wardrobe: (libDraftWardrobe?.wardrobe ?? t.wardrobe ?? []).filter(i => i.name.trim()),
@@ -1963,7 +2009,7 @@ async function importLibrary(e) {
             let id = String(raw.id || '').toLowerCase();
             if (!ID_PATTERN.test(id)) id = slugify(raw.name);
             if (lib()[id]) { id = uniqueId(id, x => !!lib()[x]); renamed++; }
-            lib()[id] = { portrait: '', description: '', details: '', traits: {}, height: '', pronouns: '', sexualExperience: '', ...raw, id, created: raw.created || Date.now() };
+            lib()[id] = { portrait: '', description: '', details: '', traits: {}, height: '', pronouns: '', sexuality: '', sexualExperience: '', ...raw, id, created: raw.created || Date.now() };
             added++;
         }
         save();
@@ -2106,7 +2152,6 @@ jQuery(async () => {
             extensions.set(def.id, def);
             if ($('#npcb_library').is(':visible') && (libSelected || libIsNew)) selectTemplate(libSelected, libIsNew);
             updateAutoInjection();
-            console.log(`[NPC Book] extension registered: ${def.id}`);
         },
         getLibrary: () => lib(),
         getTemplate: (id) => lib()[id] || null,
@@ -2125,5 +2170,4 @@ jQuery(async () => {
         util: { esc, xa, xt, normalize, slugify, indent },
     };
     document.dispatchEvent(new CustomEvent('npcbook:ready', { detail: window.NPCBook }));
-    console.log('[NPC Book] loaded');
 });
