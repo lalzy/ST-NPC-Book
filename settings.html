@@ -97,6 +97,9 @@
             <label>Speaker block rule (inserted at <code>[[SPEAKER_RULE]]</code>; the LLM wraps each character's part in <code>&lt;npc id="ID"&gt;…&lt;/npc&gt;</code>)
                 <textarea id="npcb_speakerrule" class="text_pole textarea_compact" rows="4"></textarea></label>
             <div class="menu_button" id="npcb_reset_speaker"><i class="fa-solid fa-rotate-left"></i> Reset speaker block rule</div>
+            <label>Speaker block reminder (sent right before every reply, in chat at depth 0; <code>[[IDS]]</code> = ids of the characters in the scene; empty = off)
+                <textarea id="npcb_speakerreminder" class="text_pole textarea_compact" rows="3"></textarea></label>
+            <div class="menu_button" id="npcb_reset_speakerreminder"><i class="fa-solid fa-rotate-left"></i> Reset speaker block reminder</div>
             <label class="checkbox_label"><input type="checkbox" id="npcb_autoportraits"> Generate missing portraits with the Image Generation extension (only if it is active)</label>
             <label>Portrait prompt mode
                 <select id="npcb_portraitmode" class="text_pole">

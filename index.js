@@ -16,6 +16,7 @@ const PM_SCENE_ID = 'npcbook_scene';
 const PM_INSTR_ID = 'npcbook_instructions';
 const INJECT_SCENE_KEY = 'npcbook_scene';
 const INJECT_INSTR_KEY = 'npcbook_instructions';
+const INJECT_REMIND_KEY = 'npcbook_speaker_reminder';
 
 const DEFAULT_INSTRUCTIONS = `[NPC Tracking]
 At the very end of EVERY reply, output one <npcs> block listing every character who is physically present in the scene at the end of your reply, except [[EXCLUDE]].
@@ -48,10 +49,16 @@ const DEFAULT_OUTFIT_RULES = `Clothing:
 - "condition" must be one of: [[CONDITIONS]]
 - For a NEW character also add "wardrobe": 4-8 items that fit them, as [{"name": "...", "slots": ["..."]}], and "outfit": {"wear": ["item name", ...]} for what they wear right now. Slots: [[SLOTS]]`;
 
-const DEFAULT_SPEAKER_RULE = `Speaker blocks:
-- Wrap each character's part of your reply (their actions, the narration about them and their dialogue) in <npc id="ID">...</npc>, using their exact id from the scene, e.g. <npc id="seraphina">She looks up from the herbs. "You're awake."</npc>
-- Start a new block whenever the focus moves to another character. Text that belongs to no one stays outside the blocks. Never nest blocks.
-- Write dialogue in plain double quotes, without any HTML or font tags.`;
+const DEFAULT_SPEAKER_RULE = `Speaker blocks (mandatory in every reply):
+- Everything a character does or says goes inside <npc id="ID">...</npc>: their actions, the narration about them, and all of their dialogue. Use their exact id from the scene.
+- Open a new block every time the focus moves to another character. Only narration that belongs to no character (setting, weather, time passing) may stand outside a block. Never nest blocks.
+- Write dialogue in plain double quotes, without HTML or font tags.
+- A reply without speaker blocks is wrong. Example of a correct reply (the ids are examples):
+The fire crackles in the hearth.
+<npc id="ada">Ada sets down the kettle. "You should rest."</npc>
+<npc id="bram">Bram folds his arms. "He's fine."</npc>`;
+
+const DEFAULT_SPEAKER_REMINDER = `[Reminder: put each character's part of this reply inside <npc id="ID">...</npc>. Characters in the scene: [[IDS]]. Only narration that belongs to no one stays outside the blocks.]`;
 
 const DEFAULT_ASSIST_CARD_PROMPT = `You help write character cards for NPCs in a roleplay.
 - Write only the fields you are asked for, in the language of the request.
@@ -172,6 +179,7 @@ const DEFAULTS = {
     dialogueColors: true,
     describeExposure: true,
     speakerRule: DEFAULT_SPEAKER_RULE,
+    speakerReminder: DEFAULT_SPEAKER_REMINDER,
     trackOutfits: true,
     includeWardrobe: true,
     allowWardrobeGrowth: false,
@@ -547,6 +555,27 @@ function updateAutoInjection() {
     const auto = s.enabled && s.injectMode === 'auto';
     c.setExtensionPrompt(INJECT_SCENE_KEY, auto ? buildSceneText() : '', Number(s.scenePosition), Number(s.sceneDepth), false, Number(s.sceneRole));
     c.setExtensionPrompt(INJECT_INSTR_KEY, auto ? buildInstructionText() : '', Number(s.instrPosition), Number(s.instrDepth), false, Number(s.instrRole));
+    // Short speaker-block reminder right before the reply (in chat, depth 0), in both injection modes.
+    c.setExtensionPrompt(INJECT_REMIND_KEY, buildSpeakerReminder(), 1, 0, false, 0);
+}
+
+/** Ids of the characters the next reply may voice: the scene, plus the main character when it is tracked. */
+function speakerIds() {
+    const c = ctx();
+    const ids = promptRoster().map(i => i.id);
+    if (settings().trackChar && c.characterId !== undefined && !c.groupId && c.name2) {
+        const id = resolveRef(c.name2, lib());
+        if (id && !ids.includes(id)) ids.unshift(id);
+    }
+    return ids;
+}
+
+function buildSpeakerReminder() {
+    const s = settings();
+    const text = String(s.speakerReminder || '').trim();
+    if (!s.enabled || !s.speakerPortraits || !text || !hasChat()) return '';
+    const ids = speakerIds();
+    return ids.length ? text.replaceAll('[[IDS]]', ids.join(', ')) : '';
 }
 
 function registerMacros() {
@@ -2647,6 +2676,8 @@ async function mountSettings() {
     root.find('#npcb_reset_portraitllm').on('click', () => { s.portraitLlmPrompt = DEFAULT_PORTRAIT_LLM_PROMPT; root.find('#npcb_portraitllm').val(s.portraitLlmPrompt); save(); });
     root.find('#npcb_speakerportraits, #npcb_speakersize, #npcb_enabled').on('input change', () => { applyCardStyle(); decorateAll(); });
     bind('#npcb_speakerrule', 'speakerRule');
+    bind('#npcb_speakerreminder', 'speakerReminder');
+    root.find('#npcb_reset_speakerreminder').on('click', () => { s.speakerReminder = DEFAULT_SPEAKER_REMINDER; root.find('#npcb_speakerreminder').val(s.speakerReminder); save(); updateAutoInjection(); });
     root.find('#npcb_reset_speaker').on('click', () => { s.speakerRule = DEFAULT_SPEAKER_RULE; root.find('#npcb_speakerrule').val(s.speakerRule); save(); });
     bind('#npcb_trackoutfits', 'trackOutfits', 'checkbox');
     bind('#npcb_exposure', 'describeExposure', 'checkbox');
