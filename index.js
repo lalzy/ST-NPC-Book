@@ -50,7 +50,38 @@ const DEFAULT_COLOR_RULE = `Dialogue colors:
 - In your reply (outside the <npcs> block), wrap every line of spoken dialogue in <font color=HEX>"..."</font> using the speaking character's Dialogue color from the scene, e.g. <font color=#e6a0c4>"Hello there."</font>
 - Use the exact color listed for that character. Characters without a Dialogue color get no font tag.`;
 
-const DEFAULT_PORTRAIT_LLM_PROMPT = `Describe {{name}} for an image generator. Use the template below.
+const DEFAULT_PORTRAIT_LLM_PROMPT = `Describe {{name}}'s portrait for an image generator. Use the template below.
+
+STEP 1 – Fill every field in your reasoning.
+Source for each field: the CHARACTER DATA and LATEST STORY MESSAGES provided below only.
+If a field is not stated in the sources, write NONE, except SPECIES: if not stated, write human.
+
+TEMPLATE
+GENDER_TAG: 1girl or 1boy
+SPECIES: e.g. human, elf (from race)
+AGE: number + "years old"
+FIGURE: 1 to 2 of: slender, petite, athletic, curvy, heavy
+SKIN: color + "skin"
+HAIR: length + color + "hair"
+HAIRSTYLE: e.g. ponytail, loose, bun
+EYES: color + "eyes"
+FACE: 1 to 2 literal facial features if stated (e.g. freckles, beard, scar)
+CLOTHING: upper-body items worn right now (from "Wearing right now"), each as color + material + item
+ACCESSORIES: glasses, jewelry, hats etc. worn right now
+EXPRESSION: one word
+SETTING: 1 to 3 words
+
+STEP 2 – Check every field.
+- Is it stated in the sources? If not, change it to NONE.
+- Does it follow the field's format? If not, fix it.
+- Is it a literal visual word? No metaphors, no names, no personality, no actions.
+
+STEP 3 – Output.
+Join the fields in template order with ", ".
+Remove every NONE field.
+Output only that line.`;
+
+const DEFAULT_PORTRAIT_LLM_PROMPT_V1 = `Describe {{name}} for an image generator. Use the template below.
 
 STEP 1 – Fill every field in your reasoning.
 Source for each field: the CHARACTER DATA and LATEST STORY MESSAGES provided below only.
@@ -108,7 +139,7 @@ const DEFAULTS = {
     numericTolerance: 2,
     autoCreate: true,
     trackChar: true,
-    traitKeys: ['age', 'gender', 'role'],
+    traitKeys: ['race', 'age', 'gender', 'role'],
     postures: ['Standing', 'Sitting', 'Lying down', 'Kneeling', 'Crouching', 'Leaning', 'Walking', 'Running'],
     states: ['Calm', 'Happy', 'Excited', 'Curious', 'Nervous', 'Afraid', 'Angry', 'Sad', 'Tired', 'Injured', 'Asleep', 'Unconscious'],
     rosterCollapsed: false,
@@ -118,6 +149,9 @@ const DEFAULTS = {
     autoPortraits: true,
     portraitPrompt: 'portrait of {{name}}, head and shoulders, {{traits}}, {{details}}',
     portraitMode: 'llm',
+    portraitFraming: true,
+    portraitPrefix: 'solo, portrait, head and shoulders, upper body, looking at viewer, face in frame, centered',
+    portraitNegative: 'close-up, extreme close-up, cropped head, head out of frame, partial face, cut off, multiple people, text, watermark',
     portraitLlmPrompt: DEFAULT_PORTRAIT_LLM_PROMPT,
     dialogueColors: true,
     colorRule: DEFAULT_COLOR_RULE,
@@ -148,6 +182,9 @@ function settings() {
     if (typeof s.instructions === 'string' && !s.instructions.includes('[[OUTFIT_RULES]]') && s.instructions.includes('\nFormat:\n')) {
         s.instructions = s.instructions.replace('\nFormat:\n', '[[OUTFIT_RULES]]\n\nFormat:\n');
     }
+    if (JSON.stringify(s.traitKeys) === JSON.stringify(['age', 'gender', 'role'])) s.traitKeys = ['race', 'age', 'gender', 'role'];
+    if (!s.portraitTemplateV2 && s.portraitLlmPrompt === DEFAULT_PORTRAIT_LLM_PROMPT_V1) s.portraitLlmPrompt = DEFAULT_PORTRAIT_LLM_PROMPT;
+    s.portraitTemplateV2 = true;
     if (typeof s.instructions === 'string' && !s.instructions.includes('[[COLOR_RULE]]')) {
         if (s.instructions.includes('[[OUTFIT_RULES]]')) s.instructions = s.instructions.replace('[[OUTFIT_RULES]]', '[[COLOR_RULE]]\n[[OUTFIT_RULES]]');
         else s.instructions += '\n[[COLOR_RULE]]';
@@ -382,7 +419,7 @@ function buildInstructionText() {
     const s = settings();
     if (!s.enabled || !hasChat()) return '';
     const c = ctx();
-    const keys = s.traitKeys.length ? s.traitKeys : ['age', 'gender', 'role'];
+    const keys = s.traitKeys.length ? s.traitKeys : ['race', 'age', 'gender', 'role'];
     const libLines = s.includeLibrary
         ? Object.values(lib()).sort((a, b) => a.name.localeCompare(b.name)).map(t => {
             const tr = traitSummary(t);
@@ -686,8 +723,11 @@ function portraitData(t) {
         if (!it) return null;
         return `${it.name}${w.condition && w.condition !== s.conditions[0] ? ` (${w.condition})` : ''}`;
     }).filter(Boolean).join(', ');
+    const labeled = settings().traitKeys.map(k => (t.traits?.[k] ? `${k}: ${t.traits[k]}` : null)).filter(Boolean).join('; ');
     return {
         name: t.name,
+        identity: labeled,
+        description: String(t.description || '').trim(),
         traits: traitSummary(t),
         details: String(t.details || '').trim(),
         outfit: wearing || (t.wardrobe?.length ? 'nothing' : ''),
@@ -729,16 +769,28 @@ function extractTagLine(text) {
     return line;
 }
 
+/** Always frame as a portrait: drop close-up tags, put the portrait prefix first, de-duplicate tags. */
+function framePortrait(line) {
+    const s = settings();
+    if (!s.portraitFraming) return line;
+    const tags = [...String(s.portraitPrefix || '').split(','), ...String(line || '').split(',')]
+        .map(x => x.trim())
+        .filter(x => x && !/\b(extreme\s+)?close[\s-]?up\b/i.test(x));
+    const seen = new Set();
+    return tags.filter(x => { const k = x.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).join(', ');
+}
+
 async function portraitPromptFor(t) {
     const s = settings();
     const d = portraitData(t);
-    if (s.portraitMode !== 'llm') return cleanForImagine(fillPortraitTemplate(s.portraitPrompt, { ...d, details: d.details.slice(0, 400) }));
+    if (s.portraitMode !== 'llm') return framePortrait(cleanForImagine(fillPortraitTemplate(s.portraitPrompt, { ...d, details: d.details.slice(0, 400) })));
     const system = fillPortraitTemplate(s.portraitLlmPrompt, d);
     const data = [
         'CHARACTER DATA',
         `Name: ${d.name}`,
-        d.traits && `Identity: ${d.traits}`,
-        d.details && `Description: ${d.details}`,
+        d.identity && `Identity: ${d.identity}`,
+        d.details && `Details: ${d.details}`,
+        d.description && `Notes: ${d.description}`,
         d.outfit && `Wearing right now: ${d.outfit}`,
         d.posture && `Posture: ${d.posture}`,
         d.state && `State: ${d.state}`,
@@ -747,7 +799,7 @@ async function portraitPromptFor(t) {
         recentStory() || '(none)',
     ].filter(x => typeof x === 'string').join('\n');
     const answer = await ctx().generateRaw({ systemPrompt: system, prompt: `${data}\n\nFollow the instructions and output only the final line.` });
-    const line = cleanForImagine(extractTagLine(answer));
+    const line = framePortrait(cleanForImagine(extractTagLine(answer)));
     console.debug('[NPC Book] portrait prompt for', t.id, '→', line);
     return line;
 }
@@ -775,7 +827,9 @@ async function runPortraitQueue() {
             try {
                 const prompt = await portraitPromptFor(t);
                 if (!prompt) { toastr.warning(`Could not build a portrait prompt for ${t.name}.`, 'NPC Book'); continue; }
-                const res = await ctx().executeSlashCommandsWithOptions(`/imagine quiet=true gallery=false extend=false edit=false "${prompt}"`, { handleParserErrors: false, handleExecutionErrors: false });
+                const neg = cleanForImagine(settings().portraitFraming ? settings().portraitNegative : '');
+                const negArg = neg ? ` negative="${neg}"` : '';
+                const res = await ctx().executeSlashCommandsWithOptions(`/imagine quiet=true gallery=false extend=false edit=false${negArg} "${prompt}"`, { handleParserErrors: false, handleExecutionErrors: false });
                 const url = String(res?.pipe ?? '').trim();
                 if (url && lib()[id]) {
                     lib()[id].portrait = url.startsWith('/') || url.startsWith('data:') || url.startsWith('http') ? url : `/${url}`;
@@ -1326,7 +1380,7 @@ function selectTemplate(id, isNew = false, tab = 'card') {
     const present = hasChat() && !isNew && currentRoster().some(i => i.id === t.id);
     libDraftWardrobe = clone({ wardrobe: t.wardrobe || [], defaultWorn: t.defaultWorn || [] });
     ed.html(`
-      <div class="npcb-tabs"><div class="npcb-tab ${tab === 'card' ? 'active' : ''}" data-tab="card">Card</div><div class="npcb-tab ${tab === 'wardrobe' ? 'active' : ''}" data-tab="wardrobe">Wardrobe (${(t.wardrobe || []).length})</div></div>
+      <div class="npcb-tabs"><div class="npcb-tab ${tab === 'card' ? 'active' : ''}" data-tab="card">Card</div><div class="npcb-tab ${tab === 'outfit' ? 'active' : ''}" data-tab="outfit">Starting outfit</div><div class="npcb-tab ${tab === 'wardrobe' ? 'active' : ''}" data-tab="wardrobe">Wardrobe (${(t.wardrobe || []).length})</div></div>
       <div class="npcb-tabpane" data-pane="card" ${tab === 'card' ? '' : 'style="display:none"'}>
       <div class="npcb-ed-top">
         <div class="npcb-ed-portrait" title="Click to set portrait">${avatarHtml(t, t.name || '?', 'npcb-ava-lg')}</div>
@@ -1343,6 +1397,7 @@ function selectTemplate(id, isNew = false, tab = 'card') {
             </div></label>
           <div class="npcb-row npcb-ed-portrait-btns">
             <div class="menu_button npcb-ed-setimg"><i class="fa-solid fa-image"></i> Portrait</div>
+            <div class="menu_button npcb-ed-cropimg" title="Crop portrait"><i class="fa-solid fa-crop-simple"></i> Crop</div>
             <div class="menu_button npcb-ed-clrimg"><i class="fa-solid fa-trash-can"></i></div>
             ${isNew ? '' : '<div class="menu_button npcb-ed-genimg" title="Generate with the Image Generation extension"><i class="fa-solid fa-wand-magic-sparkles"></i> Generate</div>'}
           </div>
@@ -1356,6 +1411,10 @@ function selectTemplate(id, isNew = false, tab = 'card') {
         <div><b>Identity</b> <small class="npcb-dim">(used to tell same-name characters apart; empty fields fall back to searching the Details text)</small></div>
         ${traitKeys.map(k => `<label>${esc(k)}<input class="text_pole npcb-ed-trait" data-key="${esc(k)}" value="${esc(t.traits?.[k] ?? '')}"></label>`).join('')}
       </div>
+      </div>
+      <div class="npcb-tabpane" data-pane="outfit" ${tab === 'outfit' ? '' : 'style="display:none"'}>
+        <small class="npcb-dim">What this NPC wears when entering a scene, and what portraits are generated with from the library. During a story, the outfit they currently wear is used instead. Click a slot to pick from the wardrobe.</small>
+        <div class="npcb-start-doll"></div>
       </div>
       <div class="npcb-tabpane" data-pane="wardrobe" ${tab === 'wardrobe' ? '' : 'style="display:none"'}>
         <div class="npcb-wd-host"></div>
@@ -1371,16 +1430,53 @@ function selectTemplate(id, isNew = false, tab = 'card') {
     ed.off('.npcb');
     bindTabs(ed);
     mountWardrobeEditor(ed.find('.npcb-wd-host'), libDraftWardrobe);
-    ed.on('click.npcb', '.npcb-ed-portrait, .npcb-ed-setimg', () => ed.find('.npcb-ed-file').trigger('click'));
+    const showDraft = () => {
+        const cur = libDraftPortrait === null ? (lib()[t.id]?.portrait || '') : libDraftPortrait;
+        ed.find('.npcb-ed-portrait').html(cur ? `<img class="npcb-ava npcb-ava-lg" src="${esc(cur)}">` : avatarHtml(null, ed.find('.npcb-ed-name').val() || '?', 'npcb-ava-lg'));
+    };
+    const usePicked = async (url) => {
+        if (!url) return;
+        const cropped = await cropImageUrl(url, true);
+        libDraftPortrait = cropped || url;
+        showDraft();
+    };
+    ed.on('click.npcb', '.npcb-ed-portrait, .npcb-ed-setimg', (e) => {
+        e.stopPropagation();
+        openPortraitMenu(e.currentTarget, {
+            local: () => ed.find('.npcb-ed-file').trigger('click'),
+            server: async () => usePicked(await openServerImagePicker()),
+            crop: async () => {
+                const cur = libDraftPortrait === null ? (lib()[t.id]?.portrait || '') : libDraftPortrait;
+                if (!cur) { toastr.info('No portrait to crop yet.', 'NPC Book'); return; }
+                const cropped = await cropImageUrl(cur, false);
+                if (cropped) { libDraftPortrait = cropped; showDraft(); }
+            },
+            generate: isNew ? null : () => { toastr.info(`Generating a portrait for ${t.name}…`, 'NPC Book'); ensurePortrait(t.id, { force: true }); },
+            remove: () => { libDraftPortrait = ''; showDraft(); },
+        });
+    });
+    ed.on('click.npcb', '.npcb-ed-cropimg', async () => {
+        const cur = libDraftPortrait === null ? (lib()[t.id]?.portrait || '') : libDraftPortrait;
+        if (!cur) { toastr.info('No portrait to crop yet.', 'NPC Book'); return; }
+        const cropped = await cropImageUrl(cur, false);
+        if (cropped) { libDraftPortrait = cropped; showDraft(); }
+    });
     ed.on('change.npcb', '.npcb-ed-file', async (e) => {
         const file = e.target.files?.[0];
         e.target.value = '';
         if (!file) return;
-        try {
-            libDraftPortrait = await resizeImage(file, 512);
-            ed.find('.npcb-ed-portrait').html(`<img class="npcb-ava npcb-ava-lg" src="${libDraftPortrait}">`);
-        } catch (err) { toastr.error('Could not read image.', 'NPC Book'); }
+        try { await usePicked(await readFileAsDataUrl(file)); } catch (err) { toastr.error('Could not read image.', 'NPC Book'); }
     });
+    ed.on('click.npcb', '.npcb-tab[data-tab="outfit"]', () => mountStartOutfit());
+    const mountStartOutfit = () => mountPaperdoll(
+        ed.find('.npcb-start-doll'),
+        () => libDraftWardrobe.defaultWorn.map(id => ({ id, condition: settings().conditions[0] })),
+        (o) => { libDraftWardrobe.defaultWorn = o.map(w => w.id); },
+        () => libDraftWardrobe.wardrobe,
+        () => ed.find('.npcb-tab[data-tab="wardrobe"]').trigger('click'),
+    );
+    ed.on('click.npcb', '.npcb-tab[data-tab="wardrobe"]', () => mountWardrobeEditor(ed.find('.npcb-wd-host'), libDraftWardrobe));
+    if (tab === 'outfit') mountStartOutfit();
     ed.on('click.npcb', '.npcb-ed-genimg', () => {
         toastr.info(`Generating a portrait for ${t.name}…`, 'NPC Book');
         ensurePortrait(t.id, { force: true });
@@ -1441,6 +1537,7 @@ async function saveTemplateFromEditor(t, isNew) {
     ed.find('.npcb-ed-trait').each((_, el) => { traits[$(el).data('key')] = String($(el).val() ?? '').trim(); });
     let portrait = t.portrait || '';
     if (libDraftPortrait === '') portrait = '';
+    else if (libDraftPortrait && !String(libDraftPortrait).startsWith('data:')) portrait = libDraftPortrait;
     else if (libDraftPortrait) {
         try { portrait = await uploadPortrait(libDraftPortrait, id); } catch (e) { console.warn('[NPC Book] upload failed, storing inline', e); portrait = libDraftPortrait; }
     }
@@ -1472,6 +1569,105 @@ async function saveTemplateFromEditor(t, isNew) {
     }
     selectTemplate(id, false, String(ed.find('.npcb-tab.active').data('tab') || 'card'));
     renderRoster();
+}
+
+function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onerror = reject;
+        r.onload = () => resolve(String(r.result));
+        r.readAsDataURL(file);
+    });
+}
+
+/** Downscale any image URL to max px (longest side) as webp data URL. */
+function downscaleUrl(url, max = 512) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onerror = reject;
+        img.onload = () => {
+            const scale = Math.min(1, max / Math.max(img.width, img.height));
+            const cv = document.createElement('canvas');
+            cv.width = Math.round(img.width * scale);
+            cv.height = Math.round(img.height * scale);
+            cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+            resolve(cv.toDataURL('image/webp', 0.9));
+        };
+        img.src = url;
+    });
+}
+
+/**
+ * Square crop using SillyTavern's built-in cropper (works with mouse and touch).
+ * offerFull: cancel means "use the full image" (returns null) instead of "abort".
+ */
+async function cropImageUrl(url, offerFull) {
+    const c = ctx();
+    const result = await c.callGenericPopup(offerFull ? 'Crop the portrait, or keep the full image.' : 'Crop the portrait.', c.POPUP_TYPE.CROP, '', {
+        cropImage: url, cropAspect: 1, okButton: 'Crop', cancelButton: offerFull ? 'Use full image' : 'Cancel',
+    });
+    if (!result) return null;
+    try { return await downscaleUrl(String(result), 512); } catch { return String(result); }
+}
+
+function openPortraitMenu(anchor, actions) {
+    closePopovers();
+    const items = [
+        ['local', 'fa-upload', 'From this device'],
+        ['server', 'fa-server', 'From the server (ST images)'],
+        ['crop', 'fa-crop-simple', 'Crop current'],
+        ['generate', 'fa-wand-magic-sparkles', 'Generate'],
+        ['remove', 'fa-trash-can', 'Remove'],
+    ].filter(([k]) => actions[k]);
+    const pop = $(`<div class="npcb-popover npcb-menu">${items.map(([k, icon, label]) => `<div class="npcb-menu-item" data-act="${k}"><i class="fa-solid ${icon}"></i> ${label}</div>`).join('')}</div>`);
+    pop.on('click', e => e.stopPropagation());
+    pop.on('click', '.npcb-menu-item', (e) => { const k = $(e.currentTarget).data('act'); closePopovers(); actions[k]?.(); });
+    placePopover(pop, anchor);
+}
+
+/** Browse images stored on the SillyTavern server: gallery folders, character avatars, persona avatars. */
+async function openServerImagePicker() {
+    const c = ctx();
+    const headers = c.getRequestHeaders();
+    let folders = [];
+    try { folders = await (await fetch('/api/images/folders', { method: 'POST', headers, body: '{}' })).json(); } catch { folders = []; }
+    const sources = [
+        { key: '__chars', label: 'Character avatars' },
+        { key: '__personas', label: 'Persona avatars' },
+        ...folders.sort((a, b) => a.localeCompare(b)).map(f => ({ key: f, label: `Gallery: ${f}` })),
+    ];
+    const box = $(`<div class="npcb-srv">
+        <div class="npcb-row"><select class="text_pole npcb-srv-src">${sources.map(x => `<option value="${esc(x.key)}">${esc(x.label)}</option>`).join('')}</select>
+        <input type="search" class="text_pole npcb-srv-filter" placeholder="Filter…"></div>
+        <div class="npcb-srv-grid"></div></div>`);
+    let chosen = null;
+    let items = [];
+    const popup = new c.Popup(box, c.POPUP_TYPE.TEXT, '', { wide: true, large: true, allowVerticalScrolling: true, okButton: false, cancelButton: 'Cancel' });
+    const drawGrid = () => {
+        const q = normalize(box.find('.npcb-srv-filter').val());
+        const list = items.filter(x => !q || normalize(x.label).includes(q)).slice(0, 400);
+        box.find('.npcb-srv-grid').html(list.length ? list.map(x => `<div class="npcb-srv-item" data-url="${esc(x.url)}" title="${esc(x.label)}"><img loading="lazy" src="${esc(x.thumb || x.url)}"><span>${esc(x.label)}</span></div>`).join('') : '<div class="npcb-empty">No images here.</div>');
+    };
+    const load = async (key) => {
+        box.find('.npcb-srv-grid').html('<div class="npcb-empty">Loading…</div>');
+        if (key === '__chars') {
+            items = (c.characters || []).filter(ch => ch?.avatar).map(ch => ({ label: ch.name, url: `/characters/${encodeURIComponent(ch.avatar)}`, thumb: c.getThumbnailUrl('avatar', ch.avatar) }));
+        } else if (key === '__personas') {
+            const ps = c.powerUserSettings?.personas || {};
+            items = Object.entries(ps).map(([file, name]) => ({ label: String(name || file), url: getUserAvatar(file), thumb: c.getThumbnailUrl('persona', file) }));
+        } else {
+            let files = [];
+            try { files = await (await fetch('/api/images/list', { method: 'POST', headers, body: JSON.stringify({ folder: key, sortField: 'date', sortOrder: 'desc' }) })).json(); } catch { files = []; }
+            items = (Array.isArray(files) ? files : []).map(f => ({ label: f, url: `/user/images/${encodeURIComponent(key)}/${encodeURIComponent(f)}` }));
+        }
+        drawGrid();
+    };
+    box.on('change', '.npcb-srv-src', (e) => load(String(e.target.value)));
+    box.on('input', '.npcb-srv-filter', drawGrid);
+    box.on('click', '.npcb-srv-item', (e) => { chosen = $(e.currentTarget).data('url'); popup.complete(c.POPUP_RESULT.AFFIRMATIVE); });
+    load(sources[0].key);
+    await popup.show();
+    return chosen;
 }
 
 function resizeImage(file, max) {
@@ -1586,6 +1782,9 @@ async function mountSettings() {
     bind('#npcb_autoportraits', 'autoPortraits', 'checkbox');
     bind('#npcb_portraitprompt', 'portraitPrompt');
     bind('#npcb_portraitmode', 'portraitMode');
+    bind('#npcb_portraitframing', 'portraitFraming', 'checkbox');
+    bind('#npcb_portraitprefix', 'portraitPrefix');
+    bind('#npcb_portraitnegative', 'portraitNegative');
     bind('#npcb_portraitllm', 'portraitLlmPrompt');
     root.find('#npcb_reset_portraitllm').on('click', () => { s.portraitLlmPrompt = DEFAULT_PORTRAIT_LLM_PROMPT; root.find('#npcb_portraitllm').val(s.portraitLlmPrompt); save(); });
     root.find('#npcb_speakerportraits, #npcb_speakersize').on('input change', () => decorateAll());

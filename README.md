@@ -58,3 +58,15 @@ characters[
 
 ## Speaker portraits
 In AI messages, each paragraph with dialogue in an NPC's dialogue color gets that NPC's portrait at its start. The portrait appears only when the speaker changes. If an NPC has no portrait and the Image Generation extension is active, one is generated once. By default your LLM first fills a portrait template from the NPC's details, current outfit, posture and the latest story messages, and only its final tag line goes to the image generator. Switch to *Direct* mode to send a fixed prompt instead. The **Generate** button on the card makes a new portrait at any time.
+
+## Portrait tools
+Click the portrait on a card to choose:
+- **From this device**
+- **From the server**: SillyTavern's image gallery folders, character avatars and persona avatars
+- **Crop current**
+- **Generate**
+- **Remove**
+
+After you pick an image, a square crop opens (it works with mouse or touch). Choose *Use full image* to skip cropping.
+
+Generated portraits are always framed as portraits: a portrait prefix goes first, close-up tags are removed, and a negative prompt against cropped faces is added. All three are editable in settings. The LLM gets the NPC's identity (race, age, gender, role), Details, Notes (Description) and the outfit worn right now. That is the **Starting outfit** in the library, or the current outfit during a story.

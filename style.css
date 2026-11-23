@@ -127,3 +127,18 @@
 /* speaker portraits */
 .mes_text .npcb-has-speaker { display: flow-root; }
 .mes_text img.npcb-speaker { float: left; object-fit: cover; border-radius: 10px; margin: 2px 10px 4px 0; border: 2px solid var(--SmartThemeBorderColor); box-shadow: 0 2px 6px rgba(0, 0, 0, .35); }
+
+/* portrait tools */
+.npcb-ava, .mes_text img.npcb-speaker { object-position: 50% 22%; }
+.npcb-popover.npcb-menu { width: 230px; gap: 2px; padding: 6px; }
+.npcb-menu-item { padding: 7px 8px; border-radius: 7px; cursor: pointer; }
+.npcb-menu-item:hover { background: rgba(255, 255, 255, .08); }
+.npcb-menu-item i { width: 18px; text-align: center; opacity: .8; }
+.npcb-srv { text-align: left; }
+.npcb-srv .npcb-row > * { flex: 1; margin: 0; }
+.npcb-srv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin-top: 8px; }
+.npcb-srv-item { cursor: pointer; border-radius: 8px; overflow: hidden; border: 1px solid var(--SmartThemeBorderColor); display: flex; flex-direction: column; }
+.npcb-srv-item:hover { outline: 2px solid var(--SmartThemeQuoteColor, #6a6); }
+.npcb-srv-item img { width: 100%; aspect-ratio: 1; object-fit: cover; object-position: 50% 22%; display: block; }
+.npcb-srv-item span { font-size: .7em; padding: 2px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.npcb-start-doll { margin-top: 6px; }
