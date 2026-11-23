@@ -2,7 +2,7 @@
 // NPC details are injected ONLY while the NPC is present in the current chat's scene roster.
 
 import {
-    extractTracker, applyTracker, uniqueId, slugify, ID_PATTERN, normalize, pickEnum,
+    extractTracker, applyTracker, uniqueId, slugify, ID_PATTERN, normalize, pickEnum, parseLenientJson, normalizeSlots,
     extractCharacterList, resolveRef, normColor, exposureSummary, applyCastOverrides,
     defaultPronouns, PROFILE_FIELDS,
     SLOTS, applyOutfitChange, outfitFromDefault, outfitBySlot, wearItem, findItem, normOutfitChange, inferSlots,
@@ -52,6 +52,18 @@ const DEFAULT_SPEAKER_RULE = `Speaker blocks:
 - Wrap each character's part of your reply (their actions, the narration about them and their dialogue) in <npc id="ID">...</npc>, using their exact id from the scene, e.g. <npc id="seraphina">She looks up from the herbs. "You're awake."</npc>
 - Start a new block whenever the focus moves to another character. Text that belongs to no one stays outside the blocks. Never nest blocks.
 - Write dialogue in plain double quotes, without any HTML or font tags.`;
+
+const DEFAULT_ASSIST_CARD_PROMPT = `You help write character cards for NPCs in a roleplay.
+- Write only the fields you are asked for, in the language of the request.
+- Keep every value consistent with the current card unless the request says otherwise.
+- Be concrete and specific; avoid clichés and purple prose.
+- Answer with one JSON object and nothing else.`;
+
+const DEFAULT_ASSIST_WARDROBE_PROMPT = `You help build wardrobes for characters in a roleplay.
+- Suggest clothing that fits the character (culture, era, job, personality, budget) and the request.
+- Give each item a plain, specific name with color or material, e.g. "Green wool dress".
+- Each item covers one or more body slots; a dress covers upper_outer and lower_outer, a jumpsuit too.
+- Answer with one JSON object and nothing else.`;
 
 const DEFAULT_PORTRAIT_LLM_PROMPT = `Describe {{name}}'s portrait for an image generator. Use the template below.
 
@@ -163,6 +175,9 @@ const DEFAULTS = {
     trackOutfits: true,
     includeWardrobe: true,
     allowWardrobeGrowth: false,
+    wardrobeDollCollapsed: false,
+    assistCardPrompt: DEFAULT_ASSIST_CARD_PROMPT,
+    assistWardrobePrompt: DEFAULT_ASSIST_WARDROBE_PROMPT,
     outfitRules: DEFAULT_OUTFIT_RULES,
     conditions: ['Worn', 'Loosened', 'Disheveled', 'Wet', 'Dirty', 'Bloody', 'Torn'],
     personas: {},
@@ -405,7 +420,7 @@ function wearingText(outfit, wardrobe) {
 
 function wardrobeText(wardrobe) {
     if (!wardrobe?.length) return '';
-    return wardrobe.map(i => `${i.id} = ${i.name} [${i.slots.map(k => SLOT_LABEL[k] || k).join(', ')}]`).join('; ');
+    return wardrobe.map(i => `${i.id} = ${i.name} [${i.slots.map(k => SLOT_LABEL[k] || k).join(', ')}]${i.note ? ` (${i.note})` : ''}`).join('; ');
 }
 
 function outfitXml(outfit, wardrobe) {
@@ -1352,6 +1367,7 @@ function mountPaperdoll(host, getOutfit, setOutfit, getWardrobe, onEditWardrobe)
             const wornHere = bySlot[openSlot].map(w => w.item.id);
             editor = `<div class="npcb-slot-editor">
                 <b>${esc(SLOT_LABEL[openSlot])}</b>
+                ${fits.length > 8 ? '<input type="search" class="text_pole npcb-slot-search" placeholder="Search…">' : ''}
                 ${fits.length ? fits.map(i => {
                     const w = outfit.find(x => x.id === i.id);
                     return `<div class="npcb-row npcb-slot-opt" data-item="${esc(i.id)}">
@@ -1385,66 +1401,217 @@ function mountPaperdoll(host, getOutfit, setOutfit, getWardrobe, onEditWardrobe)
         draw(host.data('openSlot'));
     });
     host.on('click.doll', '.npcb-edit-wardrobe', () => onEditWardrobe?.());
+    host.on('input.doll', '.npcb-slot-search', (e) => {
+        const q = normalize(e.target.value);
+        host.find('.npcb-slot-opt').each((_, el) => { $(el).toggle(!q || normalize($(el).text()).includes(q)); });
+    });
     draw();
 }
 
-/** Wardrobe editor: mutates data = { wardrobe: [], defaultWorn: [] } in place. */
-function mountWardrobeEditor(host, data) {
-    const draw = () => {
-        const rows = data.wardrobe.map(i => `
-            <div class="npcb-wd-item" data-item="${esc(i.id)}">
-                <div class="npcb-row">
-                    <input class="text_pole npcb-wd-name" value="${esc(i.name)}" placeholder="Item name">
-                    <label class="checkbox_label" title="Worn when this character enters a scene"><input type="checkbox" class="npcb-wd-default" ${data.defaultWorn.includes(i.id) ? 'checked' : ''}> Default</label>
-                    <div class="menu_button npcb-wd-del" title="Delete item"><i class="fa-solid fa-trash-can"></i></div>
-                </div>
-                <div class="npcb-wd-slots">${SLOTS.map(x => `<span class="npcb-chip ${i.slots.includes(x.key) ? 'on' : ''}" data-slot="${x.key}">${esc(x.label)}</span>`).join('')}</div>
-                <small class="npcb-dim">id: ${esc(i.id)}</small>
-            </div>`).join('');
-        host.html(`<div class="npcb-wd-list">${rows || '<div class="npcb-empty">No clothing yet.</div>'}</div>
-            <div class="npcb-row"><input class="text_pole npcb-wd-newname" placeholder="New item, e.g. Blue dress"><div class="menu_button npcb-wd-add"><i class="fa-solid fa-plus"></i> Add</div></div>
-            <small class="npcb-dim">Click slot chips to choose which body slots an item covers (a dress = Upper (outer) + Lower (outer)). "Default" items are worn when the character enters a scene.</small>`);
+const wardrobeUi = new Map(); // per owner (NPC id / persona key), this session: { open: Set<slot> } of unfolded groups
+const GROUP_FOLD = 5;
+const SLOT_SHORT = { head: 'Head', neck: 'Neck', cover: 'Cover', upper_outer: 'Upper', upper_inner: 'Upper inner', hands: 'Hands', waist: 'Waist', lower_outer: 'Lower', lower_inner: 'Lower inner', feet_outer: 'Feet', feet_inner: 'Feet inner', other: 'Other' };
+const slotIndex = (k) => SLOTS.findIndex(x => x.key === k);
+const primarySlot = (item) => [...(item.slots || [])].sort((a, b) => slotIndex(a) - slotIndex(b))[0] || 'other';
+
+/**
+ * Wardrobe editor: collapsible starting-outfit doll on the left, compact item list on the right
+ * (grouped by slot, search, filters, sort, inline item editor, bulk actions, quick add).
+ * Mutates data = { wardrobe: [], defaultWorn: [] } in place. Returns { refresh }.
+ */
+function mountWardrobe(host, data, { key = '', onChange } = {}) {
+    const s = settings();
+    if (!wardrobeUi.has(key)) wardrobeUi.set(key, { open: new Set() });
+    const ui = wardrobeUi.get(key);
+    const st = { q: '', slot: '', starOnly: false, sort: 'slot', expanded: null, selected: new Set() };
+    host.html(`<div class="npcb-wdx ${s.wardrobeDollCollapsed ? 'npcb-doll-collapsed' : ''}">
+        <div class="npcb-wdx-doll">
+            <div class="npcb-wdx-dollhead"><span>Starting outfit</span><i class="fa-solid fa-angles-left npcb-wdx-dolltoggle" title="Hide starting outfit"></i></div>
+            <div class="npcb-wdx-grid"></div>
+            <small class="npcb-dim">★ in the list = worn at the start. Click a slot to filter the list.</small>
+        </div>
+        <div class="npcb-wdx-list">
+            <div class="npcb-wdx-tb">
+                <i class="fa-solid fa-angles-right npcb-wdx-dollshow" title="Show starting outfit"></i>
+                <input type="search" class="text_pole npcb-wdx-q" placeholder="Search…">
+                <select class="text_pole npcb-wdx-slot"><option value="">All slots</option>${SLOTS.map(x => `<option value="${x.key}">${esc(x.label)}</option>`).join('')}</select>
+                <span class="npcb-chip npcb-wdx-staronly" title="Only items worn at the start">★</span>
+                <select class="text_pole npcb-wdx-sort"><option value="slot">By slot</option><option value="name">By name</option><option value="recent">Newest</option></select>
+            </div>
+            <div class="npcb-wdx-rows"></div>
+            <div class="npcb-wdx-bulk" style="display:none"></div>
+            <div class="npcb-wdx-add"><i class="fa-solid fa-plus"></i><input class="text_pole npcb-wdx-new" placeholder="New item… (Enter)"><small class="npcb-dim npcb-wdx-newslot"></small></div>
+        </div>
+    </div>`);
+    const root = host.find('.npcb-wdx');
+    const byId = (id) => data.wardrobe.find(i => i.id === id);
+    const isStar = (id) => data.defaultWorn.includes(id);
+    const changed = () => onChange?.(data);
+    const setStar = (id, on) => {
+        data.defaultWorn = data.defaultWorn.filter(x => x !== id);
+        if (on) data.defaultWorn = wearItem(data.defaultWorn.map(x => ({ id: x })), data.wardrobe, id, s.conditions[0]).outfit.map(w => w.id);
     };
-    const itemOf = (el) => data.wardrobe.find(i => i.id === $(el).closest('.npcb-wd-item').data('item'));
-    host.off('.wd');
-    host.on('input.wd', '.npcb-wd-name', (e) => { const it = itemOf(e.target); if (it) it.name = String($(e.target).val()); });
-    host.on('change.wd', '.npcb-wd-default', (e) => {
-        const it = itemOf(e.target);
-        if (!it) return;
-        data.defaultWorn = data.defaultWorn.filter(x => x !== it.id);
-        if (e.target.checked) {
-            // keep defaults consistent: a new default replaces conflicting defaults
-            const s = settings();
-            data.defaultWorn = wearItem(data.defaultWorn.map(id => ({ id })), data.wardrobe, it.id, s.conditions[0]).outfit.map(w => w.id);
-            draw();
+    const removeIds = (ids) => {
+        data.wardrobe = data.wardrobe.filter(i => !ids.has(i.id));
+        data.defaultWorn = data.defaultWorn.filter(x => !ids.has(x));
+        for (const id of ids) st.selected.delete(id);
+        if (ids.has(st.expanded)) st.expanded = null;
+    };
+
+    const drawDoll = () => {
+        const by = outfitBySlot(data.defaultWorn.map(id => ({ id })), data.wardrobe);
+        root.find('.npcb-wdx-grid').html(SLOTS.map((x) => {
+            const n = data.wardrobe.filter(i => i.slots.includes(x.key)).length;
+            const worn = by[x.key].map(w => esc(w.item.name)).join(', ');
+            return `<div class="npcb-wdx-cell ${st.slot === x.key ? 'sel' : ''} ${worn ? 'filled' : ''}" data-slot="${x.key}" style="grid-area:${x.key}">
+                <div class="npcb-wdx-cl"><span>${esc(x.label)}</span><span>${n || ''}</span></div>
+                <div class="npcb-wdx-cw">${worn || '<span class="npcb-dim">—</span>'}</div></div>`;
+        }).join(''));
+    };
+    const rowHtml = (it) => {
+        const sel = st.selected.has(it.id);
+        const open = st.expanded === it.id;
+        return `<div class="npcb-wdx-row ${open ? 'exp' : ''} ${sel ? 'sel' : ''}" data-item="${esc(it.id)}">
+            <input type="checkbox" class="npcb-wdx-pick" ${sel ? 'checked' : ''} title="Select">
+            <span class="npcb-wdx-star ${isStar(it.id) ? 'on' : ''}" title="Worn at the start">★</span>
+            <span class="npcb-wdx-name">${esc(it.name)}</span>
+            ${it.note ? `<i class="fa-solid fa-note-sticky npcb-dim" title="${esc(it.note)}"></i>` : ''}
+            <span class="npcb-wdx-badges">${it.slots.map(k => `<span class="npcb-wdx-badge">${esc(SLOT_SHORT[k] || k)}</span>`).join('')}</span>
+            <i class="fa-solid fa-ellipsis npcb-wdx-dots" title="Edit"></i>
+        </div>${open ? `<div class="npcb-wdx-ed" data-item="${esc(it.id)}">
+            <div class="npcb-wdx-edmain">
+                <label>Name<input class="text_pole npcb-wdx-edname" value="${esc(it.name)}"></label>
+                <label>Note <small class="npcb-dim">(optional, sent to the LLM)</small><input class="text_pole npcb-wdx-ednote" value="${esc(it.note || '')}" placeholder="e.g. only worn for festivals"></label>
+                <div class="npcb-row"><div class="menu_button npcb-wdx-dup"><i class="fa-solid fa-clone"></i> Duplicate</div><div class="menu_button redWarningBG npcb-wdx-del"><i class="fa-solid fa-trash-can"></i> Delete</div><small class="npcb-dim">id: ${esc(it.id)}</small></div>
+            </div>
+            <div><div class="npcb-wdx-sec">Covers</div><div class="npcb-wdx-mini">${SLOTS.map(x => `<div class="npcb-wdx-mc ${it.slots.includes(x.key) ? 'on' : ''}" data-slot="${x.key}" style="grid-area:${x.key}">${esc(x.label)}</div>`).join('')}</div></div>
+        </div>` : ''}`;
+    };
+    const drawRows = () => {
+        const q = normalize(st.q);
+        const filtering = !!(q || st.slot || st.starOnly);
+        let items = data.wardrobe.filter(i => (!st.slot || i.slots.includes(st.slot)) && (!st.starOnly || isStar(i.id)) && (!q || normalize(`${i.name} ${i.note || ''}`).includes(q)));
+        let html = '';
+        if (!data.wardrobe.length) html = '<div class="npcb-empty">No clothing yet. Add items below, or use ✨ Assist.</div>';
+        else if (!items.length) html = '<div class="npcb-empty">No matching items.</div>';
+        else if (st.sort === 'slot') {
+            for (const x of SLOTS) {
+                const group = items.filter(i => primarySlot(i) === x.key);
+                if (!group.length) continue;
+                const foldable = !filtering && group.length > GROUP_FOLD + 1;
+                const open = !foldable || ui.open.has(x.key) || group.slice(GROUP_FOLD).some(i => i.id === st.expanded);
+                html += `<div class="npcb-wdx-grp">${esc(x.label)} · ${group.length}</div>${(open ? group : group.slice(0, GROUP_FOLD)).map(rowHtml).join('')}`;
+                if (foldable) html += `<div class="npcb-wdx-more" data-slot="${x.key}">${open ? '▴ Show less' : `▸ ${group.length - GROUP_FOLD} more`}</div>`;
+            }
+        } else {
+            items = st.sort === 'name' ? [...items].sort((a, b) => a.name.localeCompare(b.name)) : [...items].reverse();
+            html = items.map(rowHtml).join('');
         }
-    });
-    host.on('click.wd', '.npcb-chip', (e) => {
-        const it = itemOf(e.target);
-        if (!it) return;
-        const k = $(e.target).data('slot');
-        it.slots = it.slots.includes(k) ? it.slots.filter(x => x !== k) : [...it.slots, k];
-        if (!it.slots.length) it.slots = [k];
-        $(e.target).closest('.npcb-wd-slots').find('.npcb-chip').each((_, c) => $(c).toggleClass('on', it.slots.includes($(c).data('slot'))));
-    });
-    host.on('click.wd', '.npcb-wd-del', (e) => {
-        const it = itemOf(e.target);
-        if (!it) return;
-        data.wardrobe = data.wardrobe.filter(x => x !== it);
-        data.defaultWorn = data.defaultWorn.filter(x => x !== it.id);
-        draw();
-    });
-    const add = () => {
-        const name = String(host.find('.npcb-wd-newname').val() ?? '').trim();
-        if (!name) return;
-        const id = uniqueId(name, x => data.wardrobe.some(i => i.id === x));
-        data.wardrobe.push({ id, name, slots: inferSlots(name), note: '' });
-        draw();
-        host.find('.npcb-wd-newname').trigger('focus');
+        root.find('.npcb-wdx-rows').html(html);
+        const n = st.selected.size;
+        root.find('.npcb-wdx-bulk').toggle(n > 0).html(n ? `<b>${n} selected</b><span class="npcb-spacer"></span>
+            <select class="text_pole npcb-wdx-bulkslot"><option value="">Set slot…</option>${SLOTS.map(x => `<option value="${x.key}">${esc(x.label)}</option>`).join('')}</select>
+            <div class="menu_button npcb-wdx-bulkstar">★ Starting</div>
+            <div class="menu_button redWarningBG npcb-wdx-bulkdel"><i class="fa-solid fa-trash-can"></i></div>
+            <div class="menu_button npcb-wdx-bulkclear" title="Clear selection"><i class="fa-solid fa-xmark"></i></div>` : '');
+        root.find('.npcb-wdx-newslot').text(`slot: ${st.slot ? SLOT_LABEL[st.slot] : 'auto'}`);
     };
-    host.on('click.wd', '.npcb-wd-add', add);
-    host.on('keydown.wd', '.npcb-wd-newname', (e) => { if (e.key === 'Enter') add(); });
+    const draw = () => { drawDoll(); drawRows(); };
+    const itemOf = (el) => byId($(el).closest('[data-item]').data('item'));
+
+    host.off('.wdx');
+    host.on('click.wdx', '.npcb-wdx-dolltoggle, .npcb-wdx-dollshow', () => {
+        s.wardrobeDollCollapsed = !s.wardrobeDollCollapsed;
+        save();
+        root.toggleClass('npcb-doll-collapsed', s.wardrobeDollCollapsed);
+    });
+    host.on('click.wdx', '.npcb-wdx-cell', (e) => {
+        const k = $(e.currentTarget).data('slot');
+        st.slot = st.slot === k ? '' : k;
+        root.find('.npcb-wdx-slot').val(st.slot);
+        draw();
+    });
+    host.on('input.wdx', '.npcb-wdx-q', (e) => { st.q = String(e.target.value); drawRows(); });
+    host.on('change.wdx', '.npcb-wdx-slot', (e) => { st.slot = String(e.target.value); draw(); });
+    host.on('change.wdx', '.npcb-wdx-sort', (e) => { st.sort = String(e.target.value); drawRows(); });
+    host.on('click.wdx', '.npcb-wdx-staronly', (e) => { st.starOnly = !st.starOnly; $(e.currentTarget).toggleClass('on', st.starOnly); drawRows(); });
+    host.on('click.wdx', '.npcb-wdx-more', (e) => {
+        const k = $(e.currentTarget).data('slot');
+        if (ui.open.has(k)) ui.open.delete(k); else ui.open.add(k);
+        drawRows();
+    });
+    host.on('click.wdx', '.npcb-wdx-row', (e) => {
+        if ($(e.target).is('.npcb-wdx-pick, .npcb-wdx-star')) return;
+        const id = $(e.currentTarget).data('item');
+        st.expanded = st.expanded === id ? null : id;
+        drawRows();
+    });
+    host.on('click.wdx', '.npcb-wdx-star', (e) => {
+        const it = itemOf(e.target);
+        if (!it) return;
+        setStar(it.id, !isStar(it.id));
+        draw(); changed();
+    });
+    host.on('change.wdx', '.npcb-wdx-pick', (e) => {
+        const it = itemOf(e.target);
+        if (!it) return;
+        if (e.target.checked) st.selected.add(it.id); else st.selected.delete(it.id);
+        drawRows();
+    });
+    host.on('input.wdx', '.npcb-wdx-edname', (e) => {
+        const it = itemOf(e.target);
+        if (!it) return;
+        it.name = String(e.target.value);
+        root.find('.npcb-wdx-row').filter((_, el) => $(el).data('item') === it.id).find('.npcb-wdx-name').text(it.name);
+        drawDoll(); changed();
+    });
+    host.on('input.wdx', '.npcb-wdx-ednote', (e) => { const it = itemOf(e.target); if (it) { it.note = String(e.target.value).trim(); changed(); } });
+    host.on('click.wdx', '.npcb-wdx-mc', (e) => {
+        const it = itemOf(e.target);
+        if (!it) return;
+        const k = $(e.currentTarget).data('slot');
+        it.slots = it.slots.includes(k) ? it.slots.filter(x => x !== k) : [...it.slots, k].sort((a, b) => slotIndex(a) - slotIndex(b));
+        if (!it.slots.length) it.slots = [k];
+        if (isStar(it.id)) setStar(it.id, true);
+        draw(); changed();
+    });
+    host.on('click.wdx', '.npcb-wdx-dup', (e) => {
+        const it = itemOf(e.target);
+        if (!it) return;
+        const copy = { ...clone(it), id: uniqueId(it.id, x => !!byId(x)), name: `${it.name} (copy)` };
+        data.wardrobe.splice(data.wardrobe.indexOf(it) + 1, 0, copy);
+        st.expanded = copy.id;
+        draw(); changed();
+    });
+    host.on('click.wdx', '.npcb-wdx-del', (e) => {
+        const it = itemOf(e.target);
+        if (!it) return;
+        removeIds(new Set([it.id]));
+        draw(); changed();
+    });
+    host.on('change.wdx', '.npcb-wdx-bulkslot', (e) => {
+        const k = String(e.target.value);
+        if (!k) return;
+        for (const id of st.selected) { const it = byId(id); if (it) { it.slots = [k]; if (isStar(id)) setStar(id, true); } }
+        draw(); changed();
+    });
+    host.on('click.wdx', '.npcb-wdx-bulkstar', () => { for (const id of st.selected) setStar(id, true); draw(); changed(); });
+    host.on('click.wdx', '.npcb-wdx-bulkdel', () => { removeIds(new Set(st.selected)); draw(); changed(); });
+    host.on('click.wdx', '.npcb-wdx-bulkclear', () => { st.selected.clear(); drawRows(); });
+    host.on('keydown.wdx', '.npcb-wdx-new', (e) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        const name = String($(e.target).val() ?? '').trim();
+        if (!name) return;
+        const item = { id: uniqueId(name, x => !!byId(x)), name, slots: st.slot ? [st.slot] : inferSlots(name), note: '' };
+        data.wardrobe.push(item);
+        st.expanded = item.id; // open it, so the guessed slots can be checked right away
+        $(e.target).val('');
+        draw(); changed();
+        root.find('.npcb-wdx-row').filter((_, el) => $(el).data('item') === item.id)[0]?.scrollIntoView({ block: 'nearest' });
+    });
     draw();
+    return { refresh: draw };
 }
 
 function openUserEditor(anchor) {
@@ -1476,7 +1643,7 @@ function openUserEditor(anchor) {
     placePopover(pop, anchor);
 }
 
-/** Persona character editor: wardrobe, starting outfit and every sister-extension sheet (e.g. GURPS), in one window. */
+/** Persona character editor: wardrobe (with starting outfit) and every sister-extension sheet (e.g. GURPS), in one window. */
 async function openPersonaCharacter(tab = 'wardrobe') {
     const c = ctx();
     const p = personaData();
@@ -1484,34 +1651,22 @@ async function openPersonaCharacter(tab = 'wardrobe') {
     const draft = clone({ wardrobe: p.wardrobe, defaultWorn: p.defaultWorn, ext: p.ext });
     const extTabs = [...extensions.values()].filter(x => x.personaSheet);
     for (const x of extTabs) if (!draft.ext[x.id]) draft.ext[x.id] = typeof x.defaultData === 'function' ? x.defaultData() : {};
+    if (!tab.startsWith('ext:')) tab = 'wardrobe';
     const ava = personaKey() ? `<img class="npcb-ava npcb-ava-md" src="${esc(getUserAvatar(personaKey()))}">` : avatarHtml(null, c.name1, 'npcb-ava-md');
     const box = $(`<div class="npcb-persona-char">
         <div class="npcb-inst-head">${ava}<div><b>${esc(c.name1)}</b><br><small class="npcb-dim">persona character · description, name and avatar come from Persona Management</small></div></div>
         <div class="npcb-tabs">
             <div class="npcb-tab ${tab === 'wardrobe' ? 'active' : ''}" data-tab="wardrobe">Wardrobe</div>
-            <div class="npcb-tab ${tab === 'outfit' ? 'active' : ''}" data-tab="outfit">Starting outfit</div>
             ${extTabs.map(x => `<div class="npcb-tab ${tab === `ext:${x.id}` ? 'active' : ''}" data-tab="ext:${esc(x.id)}">${esc(x.personaSheet.label || x.id)}</div>`).join('')}
         </div>
-        <div class="npcb-tabpane" data-pane="wardrobe" ${tab === 'wardrobe' ? '' : 'style="display:none"'}><div class="npcb-wd-host"></div></div>
-        <div class="npcb-tabpane" data-pane="outfit" ${tab === 'outfit' ? '' : 'style="display:none"'}>
-            <small class="npcb-dim">What you wear when a new chat starts (and when you switch to this persona).</small>
-            <div class="npcb-start-doll"></div>
+        <div class="npcb-tabpane" data-pane="wardrobe" ${tab === 'wardrobe' ? '' : 'style="display:none"'}>
+            <small class="npcb-dim">★ items are what you wear when a new chat starts (and when you switch to this persona).</small>
+            <div class="npcb-wd-host"></div>
         </div>
         ${extTabs.map(x => `<div class="npcb-tabpane" data-pane="ext:${esc(x.id)}" ${tab === `ext:${x.id}` ? '' : 'style="display:none"'}><div class="npcb-ext-host" data-ext="${esc(x.id)}"></div></div>`).join('')}
     </div>`);
     bindTabs(box);
-    const mountWd = () => mountWardrobeEditor(box.find('.npcb-wd-host'), draft);
-    const mountDoll = () => mountPaperdoll(
-        box.find('.npcb-start-doll'),
-        () => draft.defaultWorn.map(id => ({ id, condition: settings().conditions[0] })),
-        (o) => { draft.defaultWorn = o.map(w => w.id); },
-        () => draft.wardrobe,
-        () => box.find('.npcb-tab[data-tab="wardrobe"]').trigger('click'),
-    );
-    box.on('click', '.npcb-tab[data-tab="wardrobe"]', mountWd);
-    box.on('click', '.npcb-tab[data-tab="outfit"]', mountDoll);
-    mountWd();
-    mountDoll();
+    mountWardrobe(box.find('.npcb-wd-host'), draft, { key: `persona:${personaKey()}` });
     for (const x of extTabs) {
         try { x.personaSheet.render(box.find(`.npcb-ext-host[data-ext="${x.id}"]`), { data: draft.ext[x.id], kind: 'user', name: c.name1 }); } catch (e) { console.error(e); }
     }
@@ -1567,6 +1722,7 @@ let libSelected = null;
 let libIsNew = false;
 let libDraftPortrait = null;
 let libDraftWardrobe = null;
+let libWardrobeUi = null;
 let libDraftExt = {};
 
 function ensureTopButton() {
@@ -1600,6 +1756,7 @@ function ensureLibraryModal() {
             <div class="npcb-lib-list"></div>
           </div>
           <div class="npcb-lib-editor"></div>
+          <div class="npcb-assist" style="display:none"></div>
         </div>
       </div>
     </div>`);
@@ -1612,6 +1769,7 @@ function ensureLibraryModal() {
     modal.on('click', '.npcb-lib-export', exportLibrary);
     modal.on('click', '.npcb-lib-import', () => modal.find('.npcb-lib-import-file').trigger('click'));
     modal.on('change', '.npcb-lib-import-file', importLibrary);
+    bindAssist(modal);
 }
 
 function openLibrary(id = null, isNew = false, tab = 'card') {
@@ -1641,6 +1799,8 @@ function renderLibraryList() {
 }
 
 function selectTemplate(id, isNew = false, tab = 'card') {
+    if (tab === 'outfit') tab = 'wardrobe';
+    resetAssistFor(isNew ? '__new__' : id);
     libIsNew = isNew;
     libSelected = isNew ? null : id;
     libDraftPortrait = null;
@@ -1656,7 +1816,7 @@ function selectTemplate(id, isNew = false, tab = 'card') {
     libDraftExt = clone(t.ext || {});
     const extTabs = [...extensions.values()].filter(x => x.cardTab);
     ed.html(`
-      <div class="npcb-tabs"><div class="npcb-tab ${tab === 'card' ? 'active' : ''}" data-tab="card">Card</div><div class="npcb-tab ${tab === 'outfit' ? 'active' : ''}" data-tab="outfit">Starting outfit</div><div class="npcb-tab ${tab === 'wardrobe' ? 'active' : ''}" data-tab="wardrobe">Wardrobe (${(t.wardrobe || []).length})</div>${extTabs.map(x => `<div class="npcb-tab ${tab === `ext:${x.id}` ? 'active' : ''}" data-tab="ext:${esc(x.id)}">${esc(x.cardTab.label || x.id)}</div>`).join('')}</div>
+      <div class="npcb-tabs"><div class="npcb-tab ${tab === 'card' ? 'active' : ''}" data-tab="card">Card</div><div class="npcb-tab ${tab === 'wardrobe' ? 'active' : ''}" data-tab="wardrobe">Wardrobe (${(t.wardrobe || []).length})</div>${extTabs.map(x => `<div class="npcb-tab ${tab === `ext:${x.id}` ? 'active' : ''}" data-tab="ext:${esc(x.id)}">${esc(x.cardTab.label || x.id)}</div>`).join('')}</div>
       <div class="npcb-tabpane" data-pane="card" ${tab === 'card' ? '' : 'style="display:none"'}>
       <div class="npcb-ed-top">
         <div class="npcb-ed-portrait" title="Click to set portrait">${avatarHtml(t, t.name || '?', 'npcb-ava-lg')}</div>
@@ -1695,10 +1855,6 @@ function selectTemplate(id, isNew = false, tab = 'card') {
         <label>Sexual experience<input class="text_pole npcb-ed-sexexp" value="${esc(t.sexualExperience ?? '')}" placeholder="e.g. virgin, experienced"></label>
       </div>
       </div>
-      <div class="npcb-tabpane" data-pane="outfit" ${tab === 'outfit' ? '' : 'style="display:none"'}>
-        <small class="npcb-dim">What this NPC wears when entering a scene, and what portraits are generated with from the library. During a story, the outfit they currently wear is used instead. Click a slot to pick from the wardrobe.</small>
-        <div class="npcb-start-doll"></div>
-      </div>
       <div class="npcb-tabpane" data-pane="wardrobe" ${tab === 'wardrobe' ? '' : 'style="display:none"'}>
         <div class="npcb-wd-host"></div>
       </div>
@@ -1707,13 +1863,20 @@ function selectTemplate(id, isNew = false, tab = 'card') {
         <div class="menu_button npcb-ed-save"><i class="fa-solid fa-floppy-disk"></i> Save</div>
         ${isNew ? '' : `<div class="menu_button npcb-ed-scene">${present ? '<i class="fa-solid fa-user-minus"></i> Remove from scene' : '<i class="fa-solid fa-user-plus"></i> Add to scene'}</div>`}
         ${isNew ? '' : '<div class="menu_button npcb-ed-dup"><i class="fa-solid fa-clone"></i> Duplicate</div>'}
+        ${isNew ? '' : '<div class="menu_button npcb-ed-export" title="Export this NPC (saved version) as JSON"><i class="fa-solid fa-file-export"></i> Export</div>'}
+        <div class="menu_button npcb-ed-assist" title="LLM assist for the card or wardrobe"><i class="fa-solid fa-wand-magic-sparkles"></i> Assist</div>
         <span class="npcb-spacer"></span>
         ${isNew ? '' : '<div class="menu_button redWarningBG npcb-ed-del"><i class="fa-solid fa-trash"></i> Delete</div>'}
       </div>`);
 
     ed.off('.npcb');
     bindTabs(ed);
-    mountWardrobeEditor(ed.find('.npcb-wd-host'), libDraftWardrobe);
+    ed.on('click.npcb', '.npcb-tab', () => renderAssist());
+    ed.on('click.npcb', '.npcb-ed-export', () => exportNpcs([lib()[t.id]].filter(Boolean), `${t.id}.npcbook.json`));
+    libWardrobeUi = mountWardrobe(ed.find('.npcb-wd-host'), libDraftWardrobe, {
+        key: isNew ? '' : t.id,
+        onChange: (d) => ed.find('.npcb-tab[data-tab="wardrobe"]').text(`Wardrobe (${d.wardrobe.length})`),
+    });
     const showDraft = () => {
         const cur = libDraftPortrait === null ? (lib()[t.id]?.portrait || '') : libDraftPortrait;
         ed.find('.npcb-ed-portrait').html(cur ? `<img class="npcb-ava npcb-ava-lg" src="${esc(cur)}">` : avatarHtml(null, ed.find('.npcb-ed-name').val() || '?', 'npcb-ava-lg'));
@@ -1751,16 +1914,6 @@ function selectTemplate(id, isNew = false, tab = 'card') {
         if (!file) return;
         try { await usePicked(await readFileAsDataUrl(file)); } catch (err) { toastr.error('Could not read image.', 'NPC Book'); }
     });
-    ed.on('click.npcb', '.npcb-tab[data-tab="outfit"]', () => mountStartOutfit());
-    const mountStartOutfit = () => mountPaperdoll(
-        ed.find('.npcb-start-doll'),
-        () => libDraftWardrobe.defaultWorn.map(id => ({ id, condition: settings().conditions[0] })),
-        (o) => { libDraftWardrobe.defaultWorn = o.map(w => w.id); },
-        () => libDraftWardrobe.wardrobe,
-        () => ed.find('.npcb-tab[data-tab="wardrobe"]').trigger('click'),
-    );
-    ed.on('click.npcb', '.npcb-tab[data-tab="wardrobe"]', () => mountWardrobeEditor(ed.find('.npcb-wd-host'), libDraftWardrobe));
-    if (tab === 'outfit') mountStartOutfit();
     for (const x of extTabs) {
         const host = ed.find(`.npcb-ext-host[data-ext="${x.id}"]`);
         if (!libDraftExt[x.id]) libDraftExt[x.id] = typeof x.defaultData === 'function' ? x.defaultData() : {};
@@ -1812,6 +1965,7 @@ function selectTemplate(id, isNew = false, tab = 'card') {
         openLibrary();
         renderRoster();
     });
+    renderAssist();
 }
 
 async function saveTemplateFromEditor(t, isNew) {
@@ -1985,13 +2139,32 @@ async function uploadPortrait(dataUrl, id) {
     return p.startsWith('/') ? p : `/${p}`;
 }
 
-function exportLibrary() {
-    const blob = new Blob([JSON.stringify({ npcbook: 1, npcs: Object.values(lib()) }, null, 2)], { type: 'application/json' });
+/** A card ready to share: no local bookkeeping, portrait embedded so it works on another SillyTavern. */
+async function portableNpc(t) {
+    const out = clone(t);
+    delete out.auto;
+    delete out.created;
+    delete out.updated;
+    if (out.portrait && !String(out.portrait).startsWith('data:')) {
+        try { out.portrait = await downscaleUrl(out.portrait, 512); } catch (e) { console.warn(`[NPC Book] could not embed portrait of ${t.id}`, e); }
+    }
+    return out;
+}
+
+async function exportNpcs(list, filename) {
+    if (!list.length) return;
+    const npcs = [];
+    for (const t of list) npcs.push(await portableNpc(t));
+    const blob = new Blob([JSON.stringify({ npcbook: 1, npcs }, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `npc-book-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = filename;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function exportLibrary() {
+    return exportNpcs(Object.values(lib()), `npc-book-${new Date().toISOString().slice(0, 10)}.json`);
 }
 
 async function importLibrary(e) {
@@ -2007,15 +2180,393 @@ async function importLibrary(e) {
             let id = String(raw.id || '').toLowerCase();
             if (!ID_PATTERN.test(id)) id = slugify(raw.name);
             if (lib()[id]) { id = uniqueId(id, x => !!lib()[x]); renamed++; }
-            lib()[id] = { portrait: '', description: '', details: '', traits: {}, height: '', pronouns: '', sexuality: '', sexualExperience: '', ...raw, id, created: raw.created || Date.now() };
+            const npc = { portrait: '', description: '', details: '', traits: {}, height: '', pronouns: '', sexuality: '', sexualExperience: '', wardrobe: [], defaultWorn: [], ...raw, id, created: Date.now() };
+            if (String(npc.portrait).startsWith('data:')) {
+                try { npc.portrait = await uploadPortrait(npc.portrait, id); } catch (err) { console.warn('[NPC Book] portrait upload failed, keeping it inline', err); }
+            }
+            lib()[id] = npc;
             added++;
         }
         save();
         renderLibraryList();
+        renderRoster();
         toastr.success(`Imported ${added} NPC(s)${renamed ? `, ${renamed} got a new ID because theirs was taken` : ''}.`, 'NPC Book');
     } catch (err) {
         toastr.error('Invalid JSON file.', 'NPC Book');
     }
+}
+
+// ───────────────────────── LLM assist (library side panel) ─────────────────────────
+
+const ASSIST_FIELDS = [
+    { key: 'name', label: 'Name', sel: '.npcb-ed-name', hint: 'the character\'s name' },
+    { key: 'description', label: 'Description', sel: '.npcb-ed-desc', hint: 'one line, for the user\'s own reference' },
+    { key: 'details', label: 'Details', sel: '.npcb-ed-details', hint: 'full profile in prose: appearance, personality, background, manner of speech' },
+    { key: 'identity', label: 'Identity', sel: '.npcb-ed-trait', hint: 'object with the identity keys below' },
+    { key: 'height', label: 'Height', sel: '.npcb-ed-height', hint: 'e.g. 170 cm' },
+    { key: 'pronouns', label: 'Pronouns', sel: '.npcb-ed-pronouns', hint: 'e.g. she/her' },
+    { key: 'sexuality', label: 'Sexuality', sel: '.npcb-ed-sexuality', hint: 'e.g. heterosexual, bisexual, gay, asexual' },
+    { key: 'sexual_experience', label: 'Sexual exp.', sel: '.npcb-ed-sexexp', hint: 'e.g. virgin, experienced' },
+    { key: 'color', label: 'Color', sel: '.npcb-ed-colorhex', hint: 'dialogue color #RRGGBB that suits the character' },
+];
+const ASSIST_TEXTAREA = new Set(['description', 'details']);
+
+const assist = {
+    open: false, busy: false, owner: null,
+    card: { fields: null, useCard: true, useChat: false, prompt: '', result: null, accept: new Set() },
+    wardrobe: { count: 8, mode: 'add', cover: true, start: false, prompt: '', result: null },
+};
+
+const libEd = () => $('#npcb_library .npcb-lib-editor');
+const editorTab = () => String(libEd().find('.npcb-tab.active').data('tab') || 'card');
+
+/** Current (unsaved) values in the card editor. */
+function readCardEditor() {
+    const ed = libEd();
+    const v = (sel) => String(ed.find(sel).val() ?? '').trim();
+    const identity = {};
+    ed.find('.npcb-ed-trait').each((_, el) => { identity[$(el).data('key')] = String($(el).val() ?? '').trim(); });
+    return {
+        name: v('.npcb-ed-name'), description: v('.npcb-ed-desc'), details: v('.npcb-ed-details'), identity,
+        height: v('.npcb-ed-height'), pronouns: v('.npcb-ed-pronouns'), sexuality: v('.npcb-ed-sexuality'),
+        sexual_experience: v('.npcb-ed-sexexp'), color: v('.npcb-ed-colorhex'),
+    };
+}
+
+const isEmptyValue = (v) => (v && typeof v === 'object' ? Object.values(v).some(x => !String(x ?? '').trim()) : !String(v ?? '').trim());
+const valueText = (v) => (v && typeof v === 'object' ? Object.entries(v).filter(([, x]) => String(x ?? '').trim()).map(([k, x]) => `${k}: ${x}`).join(' · ') : String(v ?? ''));
+
+function assistJson(text) {
+    const t = String(text ?? '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
+    return parseLenientJson(t);
+}
+
+function resetAssistFor(owner) {
+    if (assist.owner === owner) return;
+    assist.owner = owner;
+    assist.card.fields = null;
+    assist.card.result = null;
+    assist.wardrobe.result = null;
+}
+
+function markAssistTargets() {
+    const ed = libEd();
+    ed.find('.npcb-assist-target').removeClass('npcb-assist-target');
+    if (!assist.open || editorTab() !== 'card' || !assist.card.fields) return;
+    for (const f of ASSIST_FIELDS) if (assist.card.fields.has(f.key)) ed.find(f.sel).addClass('npcb-assist-target');
+}
+
+function renderAssist() {
+    const panel = $('#npcb_library .npcb-assist');
+    if (!panel.length) return;
+    $('#npcb_library .npcb-modal-panel').toggleClass('npcb-assist-open', assist.open);
+    libEd().find('.npcb-ed-assist').toggleClass('active', assist.open);
+    if (!assist.open || !libEd().find('.npcb-tabs').length) { panel.hide().empty(); markAssistTargets(); return; }
+    const mode = editorTab() === 'wardrobe' ? 'wardrobe' : 'card';
+    if (mode === 'card' && !assist.card.fields) {
+        const cur = readCardEditor();
+        const empty = ASSIST_FIELDS.filter(f => f.key !== 'color' && isEmptyValue(cur[f.key])).map(f => f.key);
+        assist.card.fields = new Set(empty.length ? empty : ['details']);
+    }
+    panel.show().html(mode === 'card' ? assistCardHtml() : assistWardrobeHtml());
+    markAssistTargets();
+}
+
+function assistFoot(st, applyLabel, note) {
+    return `<div class="npcb-assist-foot">
+        <textarea class="text_pole npcb-as-prompt" rows="3" placeholder="Describe what you want…">${esc(st.prompt)}</textarea>
+        <div class="npcb-row">
+            <div class="menu_button npcb-as-gen ${assist.busy ? 'disabled' : ''}"><i class="fa-solid ${assist.busy ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'}"></i> ${assist.busy ? 'Generating…' : 'Generate'}</div>
+            <div class="menu_button npcb-as-refine ${assist.busy || !st.result ? 'disabled' : ''}" title="Change the last answer according to your prompt"><i class="fa-solid fa-rotate"></i> Refine</div>
+            <span class="npcb-spacer"></span>
+            ${applyLabel ? `<div class="menu_button npcb-as-apply ${assist.busy ? 'disabled' : ''}">${esc(applyLabel)}</div>` : ''}
+        </div>
+        <small class="npcb-dim">${esc(note)}</small>
+    </div>`;
+}
+
+function assistCardHtml() {
+    const c = assist.card;
+    const cur = readCardEditor();
+    let result = '<div class="npcb-empty">Pick the fields to write, describe what you want below, and press Generate.</div>';
+    if (c.result) {
+        result = Object.entries(c.result).map(([k, v]) => {
+            const f = ASSIST_FIELDS.find(x => x.key === k);
+            const old = valueText(cur[k]);
+            let input;
+            if (k === 'identity') {
+                input = `<div class="npcb-as-ident">${Object.entries(v).map(([tk, tv]) => `<label>${esc(tk)}<input class="text_pole npcb-as-val" data-field="identity" data-key="${esc(tk)}" value="${esc(tv)}"></label>`).join('')}</div>`;
+            } else if (ASSIST_TEXTAREA.has(k)) {
+                input = `<textarea class="text_pole npcb-as-val" data-field="${k}" rows="${k === 'details' ? 7 : 2}">${esc(v)}</textarea>`;
+            } else {
+                input = `<input class="text_pole npcb-as-val" data-field="${k}" value="${esc(v)}">`;
+            }
+            const same = old && old === valueText(v);
+            return `<div class="npcb-as-prop" data-field="${k}">
+                <label class="checkbox_label"><input type="checkbox" class="npcb-as-accept" ${c.accept.has(k) ? 'checked' : ''}> <b>${esc(f?.label || k)}</b></label>
+                ${old && !same ? `<div class="npcb-as-old">${esc(old)}</div>` : ''}${input}
+            </div>`;
+        }).join('');
+    }
+    const n = c.result ? [...c.accept].filter(k => k in c.result).length : 0;
+    return `<div class="npcb-assist-head"><b><i class="fa-solid fa-wand-magic-sparkles"></i> Assist · Card</b><span class="npcb-spacer"></span><div class="menu_button npcb-as-close" title="Close"><i class="fa-solid fa-xmark"></i></div></div>
+    <div class="npcb-assist-body">
+        <div class="npcb-assist-sec">Generate these fields</div>
+        <div class="npcb-assist-chips">${ASSIST_FIELDS.map(f => `<span class="npcb-chip ${c.fields.has(f.key) ? 'on' : ''}" data-field="${f.key}">${esc(f.label)}</span>`).join('')}</div>
+        <label class="checkbox_label"><input type="checkbox" class="npcb-as-opt" data-opt="useCard" ${c.useCard ? 'checked' : ''}> Use what's already on the card</label>
+        <label class="checkbox_label"><input type="checkbox" class="npcb-as-opt" data-opt="useChat" ${c.useChat ? 'checked' : ''}> Include recent chat</label>
+        <div class="npcb-assist-sec">Response</div>
+        ${result}
+    </div>
+    ${assistFoot(c, c.result ? `Apply ${n} field${n === 1 ? '' : 's'}` : '', 'Applied values go into the editor; nothing is saved until you press Save.')}`;
+}
+
+function assistWardrobeHtml() {
+    const w = assist.wardrobe;
+    const owned = new Set((libDraftWardrobe?.wardrobe || []).map(i => normalize(i.name)));
+    let result = '<div class="npcb-empty">Describe the style you want below and press Generate. The card\'s details are used as context.</div>';
+    if (w.result) {
+        result = `<div class="npcb-assist-sec">Response · ${w.result.items.length} items</div>` + w.result.items.map((it, i) => `<div class="npcb-as-item" data-i="${i}">
+            <div class="npcb-row"><input type="checkbox" class="npcb-as-take" ${it.take ? 'checked' : ''}><input class="text_pole npcb-as-iname" value="${esc(it.name)}">${owned.has(normalize(it.name)) ? '<span class="npcb-as-owned">already owned</span>' : ''}${w.result.starting.has(i) ? '<span class="npcb-as-start" title="Starting outfit">★</span>' : ''}</div>
+            <div class="npcb-as-slots">${SLOTS.map(x => `<span class="npcb-chip ${it.slots.includes(x.key) ? 'on' : ''}" data-slot="${x.key}">${esc(SLOT_SHORT[x.key])}</span>`).join('')}<span class="npcb-chip npcb-as-slotedit" title="Change slots">✎</span></div>
+            ${it.note ? `<small class="npcb-dim">${esc(it.note)}</small>` : ''}
+        </div>`).join('');
+    }
+    const n = w.result ? w.result.items.filter(x => x.take).length : 0;
+    return `<div class="npcb-assist-head"><b><i class="fa-solid fa-wand-magic-sparkles"></i> Assist · Wardrobe</b><span class="npcb-spacer"></span><div class="menu_button npcb-as-close" title="Close"><i class="fa-solid fa-xmark"></i></div></div>
+    <div class="npcb-assist-body">
+        <div class="npcb-row">
+            <label>Items<input type="number" min="1" max="30" class="text_pole npcb-as-wopt" data-opt="count" value="${w.count}"></label>
+            <label>Mode<select class="text_pole npcb-as-wopt" data-opt="mode"><option value="add" ${w.mode === 'add' ? 'selected' : ''}>Add to wardrobe</option><option value="replace" ${w.mode === 'replace' ? 'selected' : ''}>Replace wardrobe</option></select></label>
+        </div>
+        <label class="checkbox_label"><input type="checkbox" class="npcb-as-wopt" data-opt="cover" ${w.cover ? 'checked' : ''}> Cover the basics (underwear, sleepwear, footwear)</label>
+        <label class="checkbox_label"><input type="checkbox" class="npcb-as-wopt" data-opt="start" ${w.start ? 'checked' : ''}> Also pick a starting outfit (★)</label>
+        ${result}
+    </div>
+    ${assistFoot(w, w.result ? `${w.mode === 'replace' ? 'Replace with' : 'Add'} ${n} item${n === 1 ? '' : 's'}` : '', 'Items go into the wardrobe editor; nothing is saved until you press Save.')}`;
+}
+
+function cardContextLines(cur) {
+    const out = [];
+    const id = Object.entries(cur.identity).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join('; ');
+    if (cur.name) out.push(`Name: ${cur.name}`);
+    if (id) out.push(`Identity: ${id}`);
+    for (const [k, label] of [['height', 'Height'], ['pronouns', 'Pronouns'], ['sexuality', 'Sexuality'], ['sexual_experience', 'Sexual experience'], ['description', 'Description'], ['details', 'Details']]) {
+        if (cur[k]) out.push(`${label}: ${cur[k]}`);
+    }
+    return out;
+}
+
+async function runAssist(refine) {
+    if (assist.busy) return;
+    const mode = editorTab() === 'wardrobe' ? 'wardrobe' : 'card';
+    const st = assist[mode];
+    if (refine && (!st.result || !st.prompt.trim())) { toastr.info('Write what to change in the prompt box, then press Refine.', 'NPC Book'); return; }
+    const owner = assist.owner;
+    assist.busy = true;
+    renderAssist();
+    try {
+        const { systemPrompt, prompt } = mode === 'card' ? buildCardAssist(refine) : buildWardrobeAssist(refine);
+        const answer = await ctx().generateRaw({ systemPrompt, prompt });
+        if (assist.owner !== owner) return; // switched NPC meanwhile
+        const json = assistJson(answer);
+        if (mode === 'card') readCardAnswer(json); else readWardrobeAnswer(json);
+    } catch (e) {
+        console.warn('[NPC Book] assist failed', e);
+        toastr.error(`Assist failed: ${e?.message || e}`, 'NPC Book');
+    } finally {
+        assist.busy = false;
+        renderAssist();
+    }
+}
+
+function buildCardAssist(refine) {
+    const s = settings();
+    const c = assist.card;
+    const fields = ASSIST_FIELDS.filter(f => c.fields.has(f.key));
+    if (!fields.length) throw new Error('pick at least one field');
+    const keys = s.traitKeys.length ? s.traitKeys : ['race', 'age', 'gender', 'role'];
+    const shape = {};
+    for (const f of fields) shape[f.key] = f.key === 'identity' ? Object.fromEntries(keys.map(k => [k, '...'])) : '...';
+    const lines = [];
+    if (c.useCard) {
+        const ctxLines = cardContextLines(readCardEditor());
+        if (ctxLines.length) lines.push('CURRENT CARD', ...ctxLines, '');
+    }
+    if (c.useChat) lines.push('RECENT CHAT', recentStory(6, 4000) || '(none)', '');
+    if (refine) lines.push('YOUR PREVIOUS ANSWER', JSON.stringify(c.result), '', 'CHANGE REQUEST', c.prompt.trim());
+    else lines.push('REQUEST', c.prompt.trim() || '(no extra wishes: make it fit the card)');
+    lines.push('', 'Write these fields:', ...fields.map(f => `- ${f.key}: ${f.hint}${f.key === 'identity' ? ` (${keys.join(', ')})` : ''}`));
+    lines.push('', 'Answer with exactly this JSON shape:', JSON.stringify(shape, null, 2));
+    return { systemPrompt: s.assistCardPrompt, prompt: lines.join('\n') };
+}
+
+function readCardAnswer(json) {
+    const c = assist.card;
+    if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Error('the answer was not a JSON object');
+    const pick = (...ks) => { for (const k of ks) if (json[k] !== undefined && json[k] !== null && String(json[k]).trim() !== '') return json[k]; return undefined; };
+    const res = {};
+    for (const f of ASSIST_FIELDS) {
+        if (!c.fields.has(f.key)) continue;
+        if (f.key === 'identity') {
+            const src = json.identity && typeof json.identity === 'object' ? json.identity : json.traits && typeof json.traits === 'object' ? json.traits : null;
+            if (!src) continue;
+            const keys = [...new Set([...settings().traitKeys, ...Object.keys(readCardEditor().identity)])];
+            const id = {};
+            for (const k of keys) { const hit = Object.entries(src).find(([sk]) => normalize(sk) === normalize(k)); if (hit && String(hit[1] ?? '').trim()) id[k] = String(hit[1]).trim(); }
+            if (Object.keys(id).length) res.identity = id;
+            continue;
+        }
+        let v = f.key === 'sexual_experience' ? pick('sexual_experience', 'sexualExperience') : pick(f.key);
+        if (v === undefined) continue;
+        v = String(v).trim();
+        if (f.key === 'color') { v = normColor(v); if (!v) continue; }
+        res[f.key] = v;
+    }
+    if (!Object.keys(res).length) throw new Error('the answer did not contain any of the requested fields');
+    c.result = res;
+    c.accept = new Set(Object.keys(res));
+}
+
+function applyCardAssist() {
+    const c = assist.card;
+    if (!c.result) return;
+    const ed = libEd();
+    let n = 0;
+    for (const [k, v] of Object.entries(c.result)) {
+        if (!c.accept.has(k)) continue;
+        if (k === 'identity') {
+            for (const [tk, tv] of Object.entries(v)) ed.find('.npcb-ed-trait').filter((_, el) => $(el).data('key') === tk).val(tv).trigger('input');
+        } else {
+            const f = ASSIST_FIELDS.find(x => x.key === k);
+            ed.find(f.sel).val(v).trigger('input');
+        }
+        n++;
+    }
+    toastr.success(`Applied ${n} field${n === 1 ? '' : 's'}. Press Save to keep them.`, 'NPC Book');
+}
+
+function buildWardrobeAssist(refine) {
+    const s = settings();
+    const w = assist.wardrobe;
+    const cur = readCardEditor();
+    const existing = (libDraftWardrobe?.wardrobe || []).map(i => `${i.name} [${i.slots.join(', ')}]`);
+    const lines = ['CHARACTER', ...(cardContextLines(cur).length ? cardContextLines(cur) : ['(no details yet)']), ''];
+    if (w.mode === 'add' && existing.length) lines.push('ALREADY IN THE WARDROBE (do not repeat these)', existing.join('; '), '');
+    if (refine) lines.push('YOUR PREVIOUS ANSWER', JSON.stringify({ items: w.result.items.map(({ name, slots, note }) => ({ name, slots, note })) }), '', 'CHANGE REQUEST', w.prompt.trim());
+    else lines.push('REQUEST', w.prompt.trim() || '(no extra wishes: a practical, fitting everyday wardrobe)');
+    lines.push('', `Suggest about ${Math.max(1, Number(w.count) || 8)} items.`);
+    if (w.cover) lines.push('Make sure the set includes underwear (upper_inner, lower_inner), something to sleep in, and footwear.');
+    if (w.start) lines.push('Also list, in "starting", the item names this character wears right now (one per slot at most).');
+    const shape = { items: [{ name: 'Green wool dress', slots: ['upper_outer', 'lower_outer'], note: 'optional, short' }] };
+    if (w.start) shape.starting = ['Green wool dress'];
+    lines.push(`Valid slots: ${SLOTS.map(x => x.key).join(', ')}.`, '', 'Answer with exactly this JSON shape:', JSON.stringify(shape, null, 2));
+    return { systemPrompt: s.assistWardrobePrompt, prompt: lines.join('\n') };
+}
+
+function readWardrobeAnswer(json) {
+    const w = assist.wardrobe;
+    const raw = Array.isArray(json) ? json : Array.isArray(json?.items) ? json.items : null;
+    if (!raw) throw new Error('the answer had no "items" list');
+    const owned = new Set((libDraftWardrobe?.wardrobe || []).map(i => normalize(i.name)));
+    const items = [];
+    for (const r of raw) {
+        const name = String(typeof r === 'string' ? r : r?.name ?? '').trim();
+        if (!name || items.some(x => normalize(x.name) === normalize(name))) continue;
+        const slots = (r?.slots ?? r?.slot) ? normalizeSlots(r.slots ?? r.slot) : inferSlots(name);
+        items.push({ name, slots, note: String(r?.note ?? '').trim(), take: !owned.has(normalize(name)) });
+    }
+    if (!items.length) throw new Error('the answer had no items');
+    const starting = new Set();
+    for (const ref of Array.isArray(json?.starting) ? json.starting : []) {
+        const i = items.findIndex(x => normalize(x.name) === normalize(ref));
+        if (i >= 0) starting.add(i);
+    }
+    w.result = { items, starting };
+}
+
+function applyWardrobeAssist() {
+    const w = assist.wardrobe;
+    const d = libDraftWardrobe;
+    if (!w.result || !d) return;
+    const s = settings();
+    if (w.mode === 'replace') { d.wardrobe = []; d.defaultWorn = []; }
+    const newIds = new Map();
+    let n = 0;
+    w.result.items.forEach((it, i) => {
+        if (!it.take || !it.name.trim()) return;
+        const have = d.wardrobe.find(x => normalize(x.name) === normalize(it.name));
+        if (have) { newIds.set(i, have.id); return; }
+        const id = uniqueId(it.name, x => d.wardrobe.some(y => y.id === x));
+        d.wardrobe.push({ id, name: it.name.trim(), slots: it.slots.length ? it.slots : ['other'], note: it.note });
+        newIds.set(i, id);
+        n++;
+    });
+    if (w.start && w.result.starting.size) {
+        let worn = w.mode === 'replace' ? [] : d.defaultWorn.map(id => ({ id }));
+        for (const i of w.result.starting) if (newIds.has(i)) worn = wearItem(worn, d.wardrobe, newIds.get(i), s.conditions[0]).outfit;
+        d.defaultWorn = worn.map(x => x.id);
+    }
+    w.result = null;
+    libWardrobeUi?.refresh();
+    libEd().find('.npcb-tab[data-tab="wardrobe"]').text(`Wardrobe (${d.wardrobe.length})`);
+    toastr.success(`${w.mode === 'replace' ? 'Wardrobe replaced' : 'Added'}: ${n} item${n === 1 ? '' : 's'}. Press Save to keep them.`, 'NPC Book');
+}
+
+function bindAssist(modal) {
+    modal.on('click', '.npcb-ed-assist', () => { assist.open = !assist.open; renderAssist(); });
+    const panel = modal.find('.npcb-assist');
+    panel.on('click', '.npcb-as-close', () => { assist.open = false; renderAssist(); });
+    panel.on('click', '.npcb-assist-chips .npcb-chip', (e) => {
+        const k = $(e.currentTarget).data('field');
+        const f = assist.card.fields;
+        if (f.has(k)) f.delete(k); else f.add(k);
+        $(e.currentTarget).toggleClass('on', f.has(k));
+        markAssistTargets();
+    });
+    panel.on('change', '.npcb-as-opt', (e) => { assist.card[$(e.target).data('opt')] = e.target.checked; });
+    panel.on('input change', '.npcb-as-wopt', (e) => {
+        const k = $(e.target).data('opt');
+        assist.wardrobe[k] = e.target.type === 'checkbox' ? e.target.checked : k === 'count' ? Number(e.target.value) : String(e.target.value);
+        if (k === 'mode' && assist.wardrobe.result) renderAssist();
+    });
+    panel.on('input', '.npcb-as-prompt', (e) => { assist[editorTab() === 'wardrobe' ? 'wardrobe' : 'card'].prompt = String(e.target.value); });
+    panel.on('keydown', '.npcb-as-prompt', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runAssist(false); } });
+    panel.on('click', '.npcb-as-gen', () => runAssist(false));
+    panel.on('click', '.npcb-as-refine', () => runAssist(true));
+    panel.on('click', '.npcb-as-apply', () => { if (assist.busy) return; if (editorTab() === 'wardrobe') applyWardrobeAssist(); else applyCardAssist(); renderAssist(); });
+    // card proposals
+    panel.on('change', '.npcb-as-accept', (e) => {
+        const k = $(e.target).closest('.npcb-as-prop').data('field');
+        if (e.target.checked) assist.card.accept.add(k); else assist.card.accept.delete(k);
+        const n = [...assist.card.accept].filter(x => x in (assist.card.result || {})).length;
+        panel.find('.npcb-as-apply').text(`Apply ${n} field${n === 1 ? '' : 's'}`);
+    });
+    panel.on('input', '.npcb-as-val', (e) => {
+        const r = assist.card.result;
+        if (!r) return;
+        const k = $(e.target).data('field');
+        if (k === 'identity') r.identity[$(e.target).data('key')] = String(e.target.value); else r[k] = String(e.target.value);
+    });
+    // wardrobe proposals
+    const itemAt = (el) => assist.wardrobe.result?.items[Number($(el).closest('.npcb-as-item').data('i'))];
+    panel.on('change', '.npcb-as-take', (e) => {
+        const it = itemAt(e.target);
+        if (!it) return;
+        it.take = e.target.checked;
+        const n = assist.wardrobe.result.items.filter(x => x.take).length;
+        panel.find('.npcb-as-apply').text(`${assist.wardrobe.mode === 'replace' ? 'Replace with' : 'Add'} ${n} item${n === 1 ? '' : 's'}`);
+    });
+    panel.on('input', '.npcb-as-iname', (e) => { const it = itemAt(e.target); if (it) it.name = String(e.target.value); });
+    panel.on('click', '.npcb-as-slotedit', (e) => { $(e.currentTarget).closest('.npcb-as-slots').toggleClass('open'); });
+    panel.on('click', '.npcb-as-slots .npcb-chip[data-slot]', (e) => {
+        const it = itemAt(e.target);
+        if (!it) return;
+        const k = $(e.currentTarget).data('slot');
+        it.slots = it.slots.includes(k) ? it.slots.filter(x => x !== k) : [...it.slots, k];
+        if (!it.slots.length) it.slots = [k];
+        $(e.currentTarget).closest('.npcb-as-slots').find('.npcb-chip').each((_, c) => $(c).toggleClass('on', it.slots.includes($(c).data('slot'))));
+    });
 }
 
 // ───────────────────────── settings panel ─────────────────────────
@@ -2076,6 +2627,10 @@ async function mountSettings() {
     bind('#npcb_incwardrobe', 'includeWardrobe', 'checkbox');
     bind('#npcb_wdgrowth', 'allowWardrobeGrowth', 'checkbox');
     bind('#npcb_outfitrules', 'outfitRules');
+    bind('#npcb_assistcard', 'assistCardPrompt');
+    bind('#npcb_assistwardrobe', 'assistWardrobePrompt');
+    root.find('#npcb_reset_assistcard').on('click', () => { s.assistCardPrompt = DEFAULT_ASSIST_CARD_PROMPT; root.find('#npcb_assistcard').val(s.assistCardPrompt); save(); });
+    root.find('#npcb_reset_assistwardrobe').on('click', () => { s.assistWardrobePrompt = DEFAULT_ASSIST_WARDROBE_PROMPT; root.find('#npcb_assistwardrobe').val(s.assistWardrobePrompt); save(); });
     bind('#npcb_conditions', 'conditions', 'list');
     root.find('#npcb_reset_outfit').on('click', () => { s.outfitRules = DEFAULT_OUTFIT_RULES; root.find('#npcb_outfitrules').val(s.outfitRules); save(); });
     bind('#npcb_threshold', 'threshold', 'number');

@@ -4,6 +4,8 @@ I found Doom Enhancement SUite, RPGCompanion, SIM Tracker (etc, etc, etc) to be 
 
 To prevent LLM Hallucination drift (User is standing, hair swaying in the wind, looking majestic) we use an ENUM-based approach, dictating what it can, and can not state (Standing, sitting, etc. It get's to pick one, or user can set it), exception is inner monologe(for obvious reasons).
 
+**note:** 100% vibe-coded. I hate modding and extentions, so this is a quick way to get what I want without thinking about it too hard.
+
 # Features:
 - Dedicated NPC button to create NPCs (like lorebook/Character cards, but for 'characters', no longer do you have to choose a lesser of two evils).
 - State tracking of Posture, Emotional state, inner thoughts, and outfit.
@@ -13,8 +15,9 @@ To prevent LLM Hallucination drift (User is standing, hair swaying in the wind, 
 - Profile generation if a character doesn't have one already.
 - Speaker Cards with (optional) portrait' and their own dialogue color.
 - Set starting cast in greetings (with per-greeting overrides).
+- Export/import of characters
+- LLM assisted Generation of character fields (if desired, including adding wardrobe clothing).
 
-- Vibe coded because I hate making extensions.
 ![Character Dialogue Card](image3.png)
 ![NPC Book creation](image1.png)
 ![During chat pop-up and NPC listing](image2.png)
