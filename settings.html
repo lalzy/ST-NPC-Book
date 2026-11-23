@@ -1,0 +1,100 @@
+<div id="npcb_settings" class="npcb-settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b><i class="fa-solid fa-users-viewfinder"></i> NPC Book</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <label class="checkbox_label"><input type="checkbox" id="npcb_enabled"> Enabled</label>
+            <div class="npcb-row">
+                <div class="menu_button" id="npcb_open_lib"><i class="fa-solid fa-users-viewfinder"></i> Open NPC Library</div>
+                <div class="menu_button" id="npcb_preview"><i class="fa-solid fa-eye"></i> Preview injected text</div>
+            </div>
+
+            <hr>
+            <h4>Injection</h4>
+            <label>Mode
+                <select id="npcb_mode" class="text_pole">
+                    <option value="pm">Prompt Manager entries / macros (you place them)</option>
+                    <option value="auto">Auto inject (system message at a depth)</option>
+                </select>
+            </label>
+
+            <div id="npcb_pm_opts">
+                <small>Creates two Prompt Manager entries: <b>NPC Book — Instructions</b> (<code>{{npcInstructions}}</code>) and <b>NPC Book — Present NPCs</b> (<code>{{npcScene}}</code>). Drag them anywhere; edit each to choose role, Relative / In-Chat position and depth. <code>{{npcScene}}</code> is empty when no NPC is in the scene.</small>
+                <div class="menu_button" id="npcb_install_pm"><i class="fa-solid fa-plus"></i> Add entries to Prompt Manager</div>
+                <div id="npcb_pm_status" class="npcb-small"></div>
+            </div>
+
+            <div id="npcb_auto_opts">
+                <b>Present NPCs</b>
+                <div class="npcb-row">
+                    <label>Position<select id="npcb_scene_pos" class="text_pole">
+                        <option value="1">In chat @ depth</option>
+                        <option value="0">After main prompt</option>
+                        <option value="2">Before main prompt</option>
+                    </select></label>
+                    <label>Depth<input id="npcb_scene_depth" type="number" min="0" max="10000" class="text_pole"></label>
+                    <label>Role<select id="npcb_scene_role" class="text_pole">
+                        <option value="0">System</option><option value="1">User</option><option value="2">Assistant</option>
+                    </select></label>
+                </div>
+                <b>Instructions</b>
+                <div class="npcb-row">
+                    <label>Position<select id="npcb_instr_pos" class="text_pole">
+                        <option value="1">In chat @ depth</option>
+                        <option value="0">After main prompt</option>
+                        <option value="2">Before main prompt</option>
+                    </select></label>
+                    <label>Depth<input id="npcb_instr_depth" type="number" min="0" max="10000" class="text_pole"></label>
+                    <label>Role<select id="npcb_instr_role" class="text_pole">
+                        <option value="0">System</option><option value="1">User</option><option value="2">Assistant</option>
+                    </select></label>
+                </div>
+            </div>
+
+            <hr>
+            <h4>Tracking prompt</h4>
+            <small>Placeholders: <code>[[EXCLUDE]]</code> <code>[[COLOR_RULE]]</code> <code>[[OUTFIT_RULES]]</code> <code>[[USER_EXAMPLE]]</code> <code>[[USER]]</code> <code>[[CHAR]]</code> <code>[[POSTURES]]</code> <code>[[STATES]]</code> <code>[[TRAIT_KEYS]]</code> <code>[[TRAIT_EXAMPLE]]</code> <code>[[LIBRARY]]</code>. The LLM must answer with an <code>&lt;npcs&gt;[...]&lt;/npcs&gt;</code> JSON block, which is removed from the visible message.</small>
+            <textarea id="npcb_instructions" class="text_pole textarea_compact" rows="12"></textarea>
+            <div class="menu_button" id="npcb_reset_instr"><i class="fa-solid fa-rotate-left"></i> Reset prompt</div>
+            <label>Present-NPC block header<input id="npcb_header" class="text_pole"></label>
+            <label class="checkbox_label"><input type="checkbox" id="npcb_trackchar"> Track the main character card ({{char}}) as an NPC too</label>
+            <label class="checkbox_label"><input type="checkbox" id="npcb_include_lib"> List known NPCs (id, name, identity) in the instructions</label>
+
+            <hr>
+            <h4>Matching &amp; creation</h4>
+            <small>An NPC reported by the LLM is the same as a saved one only when (1) its ID or Name matches exactly, and (2) its identity data matches at least the threshold below. Otherwise a new NPC card is created.</small>
+            <label class="checkbox_label"><input type="checkbox" id="npcb_autocreate"> Create a new NPC card when no match is found</label>
+            <label>Data match threshold: <span id="npcb_threshold_val"></span>
+                <input id="npcb_threshold" type="range" min="0" max="100" step="5"></label>
+            <label>Numeric tolerance (e.g. age ± years)<input id="npcb_tolerance" type="number" min="0" max="100" class="text_pole"></label>
+            <label>Identity keys (one per line)<textarea id="npcb_traitkeys" class="text_pole textarea_compact" rows="3"></textarea></label>
+
+            <hr>
+            <h4>Dialogue colors</h4>
+            <label class="checkbox_label"><input type="checkbox" id="npcb_dialoguecolors"> Color each NPC's dialogue with the color set on their card</label>
+            <label>Color rule (inserted at <code>[[COLOR_RULE]]</code>)
+                <textarea id="npcb_colorrule" class="text_pole textarea_compact" rows="4"></textarea></label>
+            <div class="menu_button" id="npcb_reset_color"><i class="fa-solid fa-rotate-left"></i> Reset color rule</div>
+
+            <hr>
+            <h4>You &amp; clothing</h4>
+            <label class="checkbox_label"><input type="checkbox" id="npcb_trackuser"> Track me (persona): posture + outfit, shown left of the scene</label>
+            <label class="checkbox_label"><input type="checkbox" id="npcb_trackoutfits"> Track outfits (paperdoll + wardrobe)</label>
+            <label class="checkbox_label"><input type="checkbox" id="npcb_incwardrobe"> Send each character's wardrobe list to the LLM</label>
+            <label class="checkbox_label"><input type="checkbox" id="npcb_wdgrowth"> Let the LLM add new items to an existing wardrobe</label>
+            <label>Clothing rules (inserted at <code>[[OUTFIT_RULES]]</code>; placeholders <code>[[CONDITIONS]]</code> <code>[[SLOTS]]</code>)
+                <textarea id="npcb_outfitrules" class="text_pole textarea_compact" rows="8"></textarea></label>
+            <div class="menu_button" id="npcb_reset_outfit"><i class="fa-solid fa-rotate-left"></i> Reset clothing rules</div>
+
+            <hr>
+            <h4>Lists the LLM chooses from</h4>
+            <div class="npcb-row npcb-lists">
+                <label>Postures (one per line)<textarea id="npcb_postures" class="text_pole textarea_compact" rows="8"></textarea></label>
+                <label>States (one per line)<textarea id="npcb_states" class="text_pole textarea_compact" rows="8"></textarea></label>
+                <label>Clothing conditions (one per line, first = normal)<textarea id="npcb_conditions" class="text_pole textarea_compact" rows="8"></textarea></label>
+            </div>
+        </div>
+    </div>
+</div>
