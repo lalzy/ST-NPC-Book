@@ -40,7 +40,7 @@ Example:
 [
   {"id": "existing_id", "posture": "Sitting"},
   {"id": "other_id", "left": true},
-  {"name": "Name", "new": true, "traits": {[[TRAIT_EXAMPLE]]}, "posture": "...", "state": "...", "feelings": "...", "description": "one line", "details": "appearance, personality, background, manner of speech", "height": "...", "pronouns": "...", "sexuality": "...", "sexual_experience": "..."}[[USER_EXAMPLE]]
+  {"name": "Mara", "new": true, "traits": {[[TRAIT_EXAMPLE]]}, "posture": "Standing", "state": "Curious", "feelings": "Who are these people?", "description": "Traveling herbalist.", "details": "Lean, sun-browned, grey-streaked braid. Blunt and practical, distrusts nobles. Grew up in the hill villages; speaks in short sentences.", "height": "168 cm", "pronouns": "she/her", "sexuality": "heterosexual", "sexual_experience": "experienced"}[[USER_EXAMPLE]]
 ]
 </npcs>
 
@@ -152,6 +152,9 @@ function pickColor() {
     const pool = free.length ? free : COLOR_PALETTE;
     return pool[Math.floor(Math.random() * pool.length)];
 }
+
+/** Concrete example values for the tracking prompt (smaller models copy "..." literally). */
+const TRAIT_SAMPLES = { race: 'human', species: 'human', age: '41', gender: 'female', sex: 'female', role: 'herbalist', job: 'herbalist', occupation: 'herbalist', class: 'commoner' };
 
 const DEFAULT_USER_RULE = `- When [[USER]]'s posture or clothing changes, add {"id": "user"} with only what changed ("posture" from the list above, "outfit" with items from [[USER]]'s wardrobe). Never give [[USER]] a state or feelings.`;
 
@@ -545,7 +548,7 @@ function buildInstructionText() {
     return String(s.instructions || '')
         .replaceAll('[[SPEAKER_RULE]]', s.enabled && s.speakerPortraits ? s.speakerRule : '')
         .replaceAll('[[OUTFIT_RULES]]', [s.trackOutfits ? s.outfitRules : '', s.trackUser ? DEFAULT_USER_RULE : '', ...extInstructions()].filter(Boolean).join('\n'))
-        .replaceAll('[[USER_EXAMPLE]]', s.trackUser ? ',\n  {"id": "user", "posture": "..."}' : '')
+        .replaceAll('[[USER_EXAMPLE]]', s.trackUser ? `,\n  {"id": "user", "posture": "${s.postures[1] ?? s.postures[0] ?? 'Sitting'}"}` : '')
         .replaceAll('[[CONDITIONS]]', s.conditions.join(', '))
         .replaceAll('[[SLOTS]]', SLOTS.map(x => x.key).join(', '))
         .replaceAll('[[EXCLUDE]]', excludedNames().join(' and ') || 'the user')
@@ -554,7 +557,7 @@ function buildInstructionText() {
         .replaceAll('[[POSTURES]]', s.postures.join(', '))
         .replaceAll('[[STATES]]', s.states.join(', '))
         .replaceAll('[[TRAIT_KEYS]]', keys.join(', '))
-        .replaceAll('[[TRAIT_EXAMPLE]]', keys.map(k => `"${k}": "..."`).join(', '))
+        .replaceAll('[[TRAIT_EXAMPLE]]', keys.map(k => `"${k}": "${TRAIT_SAMPLES[normalize(k)] ?? 'unknown'}"`).join(', '))
         .replaceAll('[[LIBRARY]]', libLines.length ? libLines.join('\n') : '(none yet)');
 }
 

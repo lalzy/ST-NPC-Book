@@ -23,36 +23,54 @@ export function uniqueId(base, taken) {
 
 export const ID_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 
+function toTrackerList(json) {
+    if (json && !Array.isArray(json)) {
+        if (Array.isArray(json.present)) return json.present;
+        if (Array.isArray(json.npcs)) return json.npcs;
+        if (typeof json === 'object') return [json];
+    }
+    return json;
+}
+
 /**
- * Find the tracker block in a message.
- * Returns { found, json, raw, cleaned } where cleaned is the text with all tracker blocks removed.
+ * Find the tracker block(s) in a message.
+ * Normal case: one <npcs>...</npcs> block, which is removed from the text.
+ * Smaller models sometimes forget the tags (a bare [{"id": ...}] array at the end) or "correct" themselves
+ * several times ("Wait, let me fix that…" + another array). Then everything from the first attempt to the end
+ * of the message is removed, and the last attempt that parses is used.
+ * Returns { found, json, raw, cleaned, error }.
  */
 export function extractTracker(text) {
     const src = String(text ?? '');
-    const re = new RegExp(`<${TRACKER_TAG}>([\\s\\S]*?)(?:</${TRACKER_TAG}>|$)`, 'gi');
-    let last = null;
+    const attempts = [];
+    const tagRe = new RegExp(`<${TRACKER_TAG}>([\\s\\S]*?)(?:</${TRACKER_TAG}>|$)`, 'gi');
+    const tagged = [];
     let m;
-    while ((m = re.exec(src)) !== null) {
-        last = m;
-        if (m[0].length === 0) re.lastIndex++;
+    while ((m = tagRe.exec(src)) !== null) {
+        if (m[0].length === 0) { tagRe.lastIndex++; continue; }
+        tagged.push({ start: m.index, end: m.index + m[0].length });
+        attempts.push({ start: m.index, raw: m[1] });
     }
-    if (!last) return { found: false, json: null, raw: '', cleaned: src, error: null };
-    const cleaned = src.replace(re, '').replace(/\n{3,}/g, '\n\n').trimEnd();
-    const raw = last[1];
-    let json = null;
+    const bareRe = /(^|\n)[ \t]*(?=\[\s*\{\s*"(?:id|name)"\s*:)/g;
+    while ((m = bareRe.exec(src)) !== null) {
+        const start = m.index + m[1].length;
+        if (tagged.some(t => start >= t.start && start < t.end)) continue;
+        const close = matchBracket(src, start);
+        attempts.push({ start, raw: src.slice(start, close < 0 ? src.length : close + 1), bare: true });
+        if (m[0].length === 0) bareRe.lastIndex++;
+    }
+    if (!attempts.length) return { found: false, json: null, raw: '', cleaned: src, error: null };
+    attempts.sort((x, y) => x.start - y.start);
+    const single = attempts.length === 1 && !attempts[0].bare;
+    const cleaned = (single ? src.replace(tagRe, '') : src.slice(0, attempts[0].start)).replace(/\n{3,}/g, '\n\n').trimEnd();
     let error = null;
-    try {
-        json = parseLenientJson(raw);
-        if (json && !Array.isArray(json)) {
-            if (Array.isArray(json.present)) json = json.present;
-            else if (Array.isArray(json.npcs)) json = json.npcs;
-            else if (typeof json === 'object') json = [json];
-        }
-    } catch (e) {
-        error = e?.message || String(e);
-        json = null;
+    for (let i = attempts.length - 1; i >= 0; i--) {
+        try {
+            const json = toTrackerList(parseLenientJson(attempts[i].raw));
+            if (Array.isArray(json)) return { found: true, json, raw: attempts[i].raw, cleaned, error: null };
+        } catch (e) { error = error ?? (e?.message || String(e)); }
     }
-    return { found: true, json, raw, cleaned, error };
+    return { found: true, json: null, raw: attempts[attempts.length - 1].raw, cleaned, error };
 }
 
 export function parseLenientJson(raw) {
@@ -217,6 +235,11 @@ export function normOutfitChange(entry) {
     return o;
 }
 
+/** Tidy an id the model wrote: lower case, no stray punctuation around it ("-archmagetaxon-" → "archmagetaxon"). */
+export function cleanId(id) {
+    return String(id ?? '').trim().toLowerCase().replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '');
+}
+
 /** True when a tracker entry says the character left the scene. */
 function isLeaving(entry) {
     if (entry.left === true || entry.leave === true || entry.gone === true || entry.present === false) return true;
@@ -241,8 +264,9 @@ export function applyTracker(list, prevRoster, { library, threshold, numericTole
     const roster = prev.map(i => ({ ...i, outfit: (i.outfit || []).map(w => ({ ...w })) }));
     const excluded = new Set(excludeNames.map(normalize).filter(Boolean));
 
-    for (const entry of Array.isArray(list) ? list : []) {
-        if (!entry || typeof entry !== 'object') continue;
+    for (const raw of Array.isArray(list) ? list : []) {
+        if (!raw || typeof raw !== 'object') continue;
+        const entry = { ...raw, id: cleanId(raw.id) };
         const nm = String(entry.name ?? '').trim();
         if (!nm && !entry.id) continue;
         if (nm && excluded.has(normalize(nm))) continue;
