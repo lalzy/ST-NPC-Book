@@ -2069,6 +2069,11 @@ jQuery(async () => {
         getLibrary: () => lib(),
         getTemplate: (id) => lib()[id] || null,
         getPersonaData: (extId) => personaData().ext?.[extId] ?? null,
+        /** Who is in the current scene: [{ id, name, template }] plus your persona's name. */
+        getScene: () => ({
+            roster: hasChat() ? currentRoster().map(i => ({ id: i.id, name: templateFor(i)?.name ?? i.name ?? i.id, template: templateFor(i) })) : [],
+            userName: ctx().name1,
+        }),
         openPersonaCharacter,
         saveSettings: save,
         util: { esc, xa, xt, normalize, slugify, indent },
