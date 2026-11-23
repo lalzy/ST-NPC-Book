@@ -55,7 +55,7 @@
 
             <hr>
             <h4>Tracking prompt</h4>
-            <small>Placeholders: <code>[[EXCLUDE]]</code> <code>[[COLOR_RULE]]</code> <code>[[OUTFIT_RULES]]</code> <code>[[USER_EXAMPLE]]</code> <code>[[USER]]</code> <code>[[CHAR]]</code> <code>[[POSTURES]]</code> <code>[[STATES]]</code> <code>[[TRAIT_KEYS]]</code> <code>[[TRAIT_EXAMPLE]]</code> <code>[[LIBRARY]]</code>. The LLM must answer with an <code>&lt;npcs&gt;[...]&lt;/npcs&gt;</code> JSON block, which is removed from the visible message.</small>
+            <small>Placeholders: <code>[[EXCLUDE]]</code> <code>[[COLOR_RULE]]</code> <code>[[SPEAKER_RULE]]</code> <code>[[OUTFIT_RULES]]</code> <code>[[USER_EXAMPLE]]</code> <code>[[USER]]</code> <code>[[CHAR]]</code> <code>[[POSTURES]]</code> <code>[[STATES]]</code> <code>[[TRAIT_KEYS]]</code> <code>[[TRAIT_EXAMPLE]]</code> <code>[[LIBRARY]]</code>. The LLM must answer with an <code>&lt;npcs&gt;[...]&lt;/npcs&gt;</code> JSON block, which is removed from the visible message.</small>
             <textarea id="npcb_instructions" class="text_pole textarea_compact" rows="12"></textarea>
             <div class="menu_button" id="npcb_reset_instr"><i class="fa-solid fa-rotate-left"></i> Reset prompt</div>
             <label>Present-NPC block header<input id="npcb_header" class="text_pole"></label>
@@ -95,8 +95,11 @@
 
             <hr>
             <h4>Portraits</h4>
-            <label class="checkbox_label"><input type="checkbox" id="npcb_speakerportraits"> Show the speaker's portrait next to their dialogue (matched by dialogue color)</label>
-            <label>Portrait size (px)<input id="npcb_speakersize" type="number" min="24" max="200" class="text_pole"></label>
+            <label class="checkbox_label"><input type="checkbox" id="npcb_speakerportraits"> Show each character's part of a reply as a card with their portrait</label>
+            <label>Card portrait size (px)<input id="npcb_speakersize" type="number" min="24" max="200" class="text_pole"></label>
+            <label>Speaker block rule (inserted at <code>[[SPEAKER_RULE]]</code>; the LLM wraps each character's part in <code>&lt;npc id="ID"&gt;…&lt;/npc&gt;</code>)
+                <textarea id="npcb_speakerrule" class="text_pole textarea_compact" rows="4"></textarea></label>
+            <div class="menu_button" id="npcb_reset_speaker"><i class="fa-solid fa-rotate-left"></i> Reset speaker block rule</div>
             <label class="checkbox_label"><input type="checkbox" id="npcb_autoportraits"> Generate missing portraits with the Image Generation extension (only if it is active)</label>
             <label>Portrait prompt mode
                 <select id="npcb_portraitmode" class="text_pole">

@@ -66,7 +66,18 @@ Each character starts from their card. Any field you add overrides the card for 
 
 Item names are matched loosely, so `"jeans"` finds "Blue Jeans". An item that isn't in the wardrobe is added to it. Use `"id": "user"` to set your own starting posture and clothing.
 
-**Dialogue colors and portraits.** Each NPC's lines appear in their color, with their portrait beside them. Click the portrait on a card to upload an image, pick one from the SillyTavern server, crop it, or generate one with the Image Generation extension.
+**Speaker cards.** The AI wraps each character's part of a reply in an `<npc>` block. Each block shows as a card with that character's portrait on the left and their lines in their dialogue color. Greetings can use the same blocks, so a card's opening message looks like the rest of the chat:
+
+```html
+The glade is quiet; morning light filters through the canopy.
+
+<npc id="seraphina">*She looks up from the herbs.* "You're awake. How do you feel?"
+She kneels by the bed and checks the bandages.</npc>
+
+<npc id="suzie">*Suzie peeks around the doorframe.* "Is he okay?"</npc>
+```
+
+Use the character's NPC Library ID. Text outside a block is shown as normal narration. Start a new block whenever the focus moves to another character, and don't nest blocks. To change a character's portrait, click it on their NPC card: you can upload an image, pick one from the SillyTavern server, crop it, or generate one with the Image Generation extension. The card size is set under **Settings** → **Portraits**.
 
 **Swipes.** Swiping or deleting a message rolls the scene back to that point.
 

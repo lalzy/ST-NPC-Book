@@ -28,6 +28,7 @@ At the very end of EVERY reply, output one <npcs> block listing every character 
 - "state" must be one of: [[STATES]]
 - "feelings" is the character's private inner thoughts right now (1-2 sentences).
 [[COLOR_RULE]]
+[[SPEAKER_RULE]]
 [[OUTFIT_RULES]]
 
 Format:
@@ -51,6 +52,10 @@ const DEFAULT_OUTFIT_RULES = `Clothing:
 const DEFAULT_COLOR_RULE = `Dialogue colors:
 - In your reply (outside the <npcs> block), wrap every line of spoken dialogue in <font color=HEX data-npc="ID">"..."</font> using the speaking character's Dialogue color and exact id from the scene, e.g. <font color=#e6a0c4 data-npc="seraphina">"Hello there."</font>
 - Use the exact color and id listed for that character. Characters without a Dialogue color get no font tag.`;
+
+const DEFAULT_SPEAKER_RULE = `Speaker blocks:
+- Wrap each character's part of your reply (their actions, the narration about them and their dialogue) in <npc id="ID">...</npc>, using their exact id from the scene, e.g. <npc id="seraphina">She looks up from the herbs. "You're awake."</npc>
+- Start a new block whenever the focus moves to another character. Text that belongs to no one stays outside the blocks. Never nest blocks.`;
 
 /** Previous default color rule (no data-npc). Saved settings still equal to it are upgraded automatically. */
 const DEFAULT_COLOR_RULE_V1 = `Dialogue colors:
@@ -153,7 +158,7 @@ const DEFAULTS = {
     rosterCollapsed: false,
     trackUser: true,
     speakerPortraits: true,
-    speakerPortraitSize: 56,
+    speakerPortraitSize: 40,
     autoPortraits: true,
     portraitPrompt: 'portrait of {{name}}, head and shoulders, {{traits}}, {{details}}',
     portraitMode: 'llm',
@@ -164,6 +169,7 @@ const DEFAULTS = {
     dialogueColors: true,
     describeExposure: true,
     colorRule: DEFAULT_COLOR_RULE,
+    speakerRule: DEFAULT_SPEAKER_RULE,
     trackOutfits: true,
     includeWardrobe: true,
     allowWardrobeGrowth: false,
@@ -522,6 +528,7 @@ function buildInstructionText() {
         : [];
     return String(s.instructions || '')
         .replaceAll('[[COLOR_RULE]]', s.dialogueColors ? s.colorRule : '')
+        .replaceAll('[[SPEAKER_RULE]]', s.enabled && s.speakerPortraits ? s.speakerRule : '')
         .replaceAll('[[OUTFIT_RULES]]', [s.trackOutfits ? s.outfitRules : '', s.trackUser ? DEFAULT_USER_RULE : '', ...extInstructions()].filter(Boolean).join('\n'))
         .replaceAll('[[USER_EXAMPLE]]', s.trackUser ? ',\n  {"id": "user", "posture": "..."}' : '')
         .replaceAll('[[CONDITIONS]]', s.conditions.join(', '))
@@ -1048,6 +1055,43 @@ async function runPortraitQueue() {
 
 // ───────────────────────── speaker portraits in messages ─────────────────────────
 
+/*
+ * Speaker blocks: the LLM wraps each character's part of a reply in <npc id="ID">...</npc>.
+ * Through SillyTavern's message formatter each block becomes a card around the rendered Markdown:
+ *   <div data-npcb-turn="ID"><div data-npcb-ava></div><div data-npcb-body>…</div></div> The tags are swapped for plain-text markers before Markdown runs (so the content inside is
+ * formatted normally), and the markers are turned into the divs afterwards. The stored message keeps the tags.
+ */
+const TURN_OPEN_RE = /<npc\s+id\s*=\s*["']?([^"'>\s]+)["']?\s*>/gi;
+const TURN_CLOSE_RE = /<\/npc\s*>/gi;
+const TURN_PARTIAL_RE = /<\/?n(?:p(?:c(?:\s[^>]*)?)?)?$/i; // half-streamed tag at the very end
+const toHex = (str) => Array.from(new TextEncoder().encode(str), b => b.toString(16).padStart(2, '0')).join('');
+const fromHex = (hex) => new TextDecoder().decode(new Uint8Array(hex.match(/../g).map(x => parseInt(x, 16))));
+const turnDiv = (hex) => `<div data-npcb-turn="${xa(fromHex(hex))}"><div data-npcb-ava></div><div data-npcb-body>`;
+const TURN_END = '</div></div>';
+
+function registerTurnFormatter() {
+    const mf = ctx().messageFormatter;
+    if (!mf?.addHook) {
+        console.warn('[NPC Book] this SillyTavern version has no message formatter; <npc> speaker blocks are not rendered.');
+        return;
+    }
+    mf.addHook((mes, info) => {
+        if (info.isUser || info.isReasoning) return mes;
+        return mes
+            .replace(TURN_PARTIAL_RE, '')
+            .replace(TURN_OPEN_RE, (_, id) => `\n\nXNPCBO${toHex(id)}X\n\n`)
+            .replace(TURN_CLOSE_RE, '\n\nXNPCBCX\n\n');
+    }, { stage: mf.stage.BEFORE_REGEX, order: mf.order.EARLY });
+    mf.addHook((html) => {
+        if (!html.includes('XNPCB')) return html;
+        return html
+            .replace(/<p>\s*XNPCBO([0-9a-f]+)X\s*<\/p>/g, (_, h) => turnDiv(h))
+            .replace(/<p>\s*XNPCBCX\s*<\/p>/g, TURN_END)
+            .replace(/XNPCBO([0-9a-f]+)X/g, (_, h) => turnDiv(h))
+            .replace(/XNPCBCX/g, TURN_END);
+    }, { stage: mf.stage.AFTER_MARKDOWN, order: mf.order.LATE });
+}
+
 /** Map dialogue colour -> NPC id, preferring characters present at that message. */
 function colorMap(presentIds) {
     const map = new Map();
@@ -1083,6 +1127,59 @@ function speakerOfBlock(block, cmap) {
     return null;
 }
 
+/** Put (or remove, when id is null / has no portrait) the speaker portrait at the start of a block. */
+function placePortrait(block, id) {
+    const t = id ? lib()[id] : null;
+    if (id && t && !t.portrait) ensurePortrait(id);
+    const url = t?.portrait || '';
+    const existing = block.querySelector(':scope > img.npcb-speaker');
+    if (!url) {
+        if (existing) { existing.remove(); block.classList.remove('npcb-has-speaker'); }
+        return;
+    }
+    if (existing && existing.dataset.npc === id && existing.getAttribute('src') === url) return;
+    existing?.remove();
+    const img = document.createElement('img');
+    img.className = 'npcb-speaker';
+    img.dataset.npc = id;
+    img.src = url;
+    img.alt = t.name;
+    img.title = t.name;
+    if (normColor(t.color)) img.style.borderColor = t.color;
+    block.insertBefore(img, block.firstChild);
+    block.classList.add('npcb-has-speaker');
+}
+
+/** Fill the avatar box of a speaker card (portrait, or initials when there is none) and set its accent color. */
+function decorateTurn(turn) {
+    const ava = turn.querySelector(':scope > [data-npcb-ava]');
+    if (!ava) return;
+    const raw = turn.getAttribute('data-npcb-turn') || '';
+    const id = resolveRef(raw, lib());
+    const t = id ? lib()[id] : null;
+    if (t && !t.portrait) ensurePortrait(id);
+    const key = `${id}|${t?.portrait || ''}|${t?.color || ''}|${t?.name || ''}`;
+    if (ava.dataset.npcbKey === key) return;
+    ava.dataset.npcbKey = key;
+    ava.title = t?.name || raw;
+    if (t?.portrait) {
+        ava.style.backgroundImage = `url(${JSON.stringify(t.portrait)})`;
+        ava.textContent = '';
+    } else {
+        ava.style.backgroundImage = '';
+        ava.textContent = initials(t?.name || raw);
+    }
+    if (normColor(t?.color)) turn.style.setProperty('--npcb-c', t.color); else turn.style.removeProperty('--npcb-c');
+}
+
+/** Card on/off and avatar size, applied through CSS so themes can't override them. */
+function applyCardStyle() {
+    const s = settings();
+    const size = Math.min(200, Math.max(16, Number(s.speakerPortraitSize) || 40));
+    document.documentElement.style.setProperty('--npcb-ava-size', `${size}px`);
+    $('#chat').toggleClass('npcb-cards-off', !(s.enabled && s.speakerPortraits));
+}
+
 function decorateMessage(mesid) {
     const s = settings();
     const mesEl = document.querySelector(`#chat .mes[mesid="${mesid}"]`);
@@ -1091,6 +1188,15 @@ function decorateMessage(mesid) {
     if (!textEl) return;
     const msg = (ctx().chat || [])[Number(mesid)];
     const enabled = s.enabled && s.speakerPortraits && msg && !msg.is_user;
+
+    // 1) Speaker blocks: each block is a card; fill in its avatar.
+    const turns = Array.from(textEl.querySelectorAll('div[data-npcb-turn]'));
+    if (turns.length) {
+        for (const turn of turns) decorateTurn(turn);
+        return;
+    }
+
+    // 2) No speaker blocks (the LLM left them out): guess per paragraph from dialogue ids / colors.
     const blocks = Array.from(textEl.children).filter(el => !el.classList.contains('npcb-speaker') && /^(P|DIV|BLOCKQUOTE|LI|UL|OL)$/.test(el.tagName));
     const cmap = enabled ? colorMap(rosterAtMessage(Number(mesid))) : new Map();
     let last = null;
@@ -1101,26 +1207,7 @@ function decorateMessage(mesid) {
             if (sp && sp !== last) want = sp;
             if (sp) last = sp;
         }
-        const t = want ? lib()[want] : null;
-        if (want && !t?.portrait) ensurePortrait(want);
-        const url = t?.portrait || '';
-        const existing = block.querySelector(':scope > img.npcb-speaker');
-        if (!url) {
-            if (existing) { existing.remove(); block.classList.remove('npcb-has-speaker'); }
-            continue;
-        }
-        if (existing && existing.dataset.npc === want && existing.getAttribute('src') === url) continue;
-        existing?.remove();
-        const img = document.createElement('img');
-        img.className = 'npcb-speaker';
-        img.dataset.npc = want;
-        img.src = url;
-        img.alt = t.name;
-        img.title = t.name;
-        img.style.width = img.style.height = `${Number(s.speakerPortraitSize) || 56}px`;
-        if (normColor(t.color)) img.style.borderColor = t.color;
-        block.insertBefore(img, block.firstChild);
-        block.classList.add('npcb-has-speaker');
+        placePortrait(block, want);
     }
 }
 
@@ -2069,8 +2156,10 @@ async function mountSettings() {
     bind('#npcb_portraitnegative', 'portraitNegative');
     bind('#npcb_portraitllm', 'portraitLlmPrompt');
     root.find('#npcb_reset_portraitllm').on('click', () => { s.portraitLlmPrompt = DEFAULT_PORTRAIT_LLM_PROMPT; root.find('#npcb_portraitllm').val(s.portraitLlmPrompt); save(); });
-    root.find('#npcb_speakerportraits, #npcb_speakersize').on('input change', () => decorateAll());
+    root.find('#npcb_speakerportraits, #npcb_speakersize, #npcb_enabled').on('input change', () => { applyCardStyle(); decorateAll(); });
     bind('#npcb_colorrule', 'colorRule');
+    bind('#npcb_speakerrule', 'speakerRule');
+    root.find('#npcb_reset_speaker').on('click', () => { s.speakerRule = DEFAULT_SPEAKER_RULE; root.find('#npcb_speakerrule').val(s.speakerRule); save(); });
     root.find('#npcb_reset_color').on('click', () => { s.colorRule = DEFAULT_COLOR_RULE; root.find('#npcb_colorrule').val(s.colorRule); save(); });
     bind('#npcb_trackoutfits', 'trackOutfits', 'checkbox');
     bind('#npcb_exposure', 'describeExposure', 'checkbox');
@@ -2110,6 +2199,7 @@ function syncModeUi() {
 jQuery(async () => {
     settings();
     registerMacros();
+    registerTurnFormatter();
     ensureTopButton();
     ensureLibraryModal();
     ensureRosterBar();
@@ -2135,6 +2225,7 @@ jQuery(async () => {
     renderRoster();
     updateAutoInjection();
     observeChat();
+    applyCardStyle();
     decorateAll();
     ensurePersonaButton();
     window.NPCBook = {
