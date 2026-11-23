@@ -240,3 +240,13 @@
 @media (hover: none) { .npcb-lib-fmenu { opacity: .6; } }
 .npcb-lib-folder.npcb-drop, .npcb-lib-list.npcb-drop { outline: 2px dashed var(--SmartThemeQuoteColor, #6a6); outline-offset: -2px; background: rgba(127, 179, 138, .12); }
 .npcb-menu-danger { color: #e88; }
+
+/* dialogue examples */
+.npcb-dx-wrap { display: flex; flex-direction: column; gap: 6px; }
+.npcb-dx { border: 1px solid var(--SmartThemeBorderColor); border-radius: 8px; padding: 6px; display: flex; flex-direction: column; gap: 4px; }
+.npcb-dx .npcb-row { flex-wrap: nowrap; }
+.npcb-dx .text_pole { margin: 0; }
+.npcb-dx-kind { width: auto; flex-shrink: 0; }
+.npcb-dx-value { flex: 1; min-width: 0; width: auto; }
+.npcb-dx .menu_button { margin: 0; }
+.npcb-dx-add { width: fit-content; }

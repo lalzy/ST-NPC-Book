@@ -490,6 +490,27 @@ function buildUserBlock() {
     return [`<user name="${xa(c.name1)}">`, ...inner.map(x => indent(x, 2)), '</user>'].join('\n');
 }
 
+/**
+ * Dialogue examples to send for an NPC right now. "mood" examples only while the NPC is in that state;
+ * "situation" examples always, labeled with the situation; "always" examples always.
+ */
+function dialogueExamplesFor(t, inst) {
+    const out = [];
+    for (const d of t?.dialogue || []) {
+        const text = String(d?.text ?? '').trim();
+        if (!text) continue;
+        if (d.kind === 'mood') {
+            if (!d.value || normalize(d.value) !== normalize(inst?.state)) continue;
+            out.push({ when: `mood: ${d.value}`, text });
+        } else if (d.kind === 'situation' && String(d.value ?? '').trim()) {
+            out.push({ when: String(d.value).trim(), text });
+        } else {
+            out.push({ when: '', text });
+        }
+    }
+    return out;
+}
+
 function buildCharBlock(inst) {
     const s = settings();
     const t = templateFor(inst);
@@ -501,6 +522,8 @@ function buildCharBlock(inst) {
     if (idAttrs) inner.push(`<identity${idAttrs}/>`);
     const details = (t?.details ?? '').trim();
     if (details) inner.push(`<details>${xt(details)}</details>`);
+    const examples = dialogueExamplesFor(t, inst);
+    if (examples.length) inner.push(['<dialogue_examples>', ...examples.map(e => indent(`<example${e.when ? ` when="${xa(e.when)}"` : ''}>${xt(e.text)}</example>`, 2)), '</dialogue_examples>'].join('\n'));
     const stAttrs = [
         inst.posture && `posture="${xa(inst.posture)}"`,
         inst.state && `mood="${xa(inst.state)}"`,
@@ -1806,6 +1829,7 @@ let libDraftWardrobe = null;
 let libWardrobeUi = null;
 let libNewFolder = '';
 let libDraftExt = {};
+let libDraftDialogue = [];
 
 function ensureTopButton() {
     if ($('#npcb_topbar').length) return;
@@ -2038,6 +2062,47 @@ function renderLibraryList() {
     list.html(draw('', 0));
 }
 
+/** Dialogue example list editor. Mutates the array in place: [{ kind: 'always' | 'mood' | 'situation', value, text }]. */
+function mountDialogueExamples(host, list) {
+    const states = () => settings().states;
+    const draw = () => {
+        host.html(`${list.map((d, i) => {
+            const kind = d.kind || 'always';
+            const moods = [...states()];
+            if (kind === 'mood' && d.value && !moods.some(x => normalize(x) === normalize(d.value))) moods.unshift(d.value);
+            return `<div class="npcb-dx" data-i="${i}">
+                <div class="npcb-row">
+                    <select class="text_pole npcb-dx-kind">
+                        <option value="always" ${kind === 'always' ? 'selected' : ''}>Always</option>
+                        <option value="mood" ${kind === 'mood' ? 'selected' : ''}>When mood is…</option>
+                        <option value="situation" ${kind === 'situation' ? 'selected' : ''}>Situation…</option>
+                    </select>
+                    ${kind === 'mood' ? `<select class="text_pole npcb-dx-value">${moods.map(m => `<option value="${esc(m)}" ${normalize(m) === normalize(d.value) ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>` : ''}
+                    ${kind === 'situation' ? `<input class="text_pole npcb-dx-value" value="${esc(d.value || '')}" placeholder="e.g. talking to nobles, in combat">` : ''}
+                    <span class="npcb-spacer"></span>
+                    <div class="menu_button npcb-dx-del" title="Delete example"><i class="fa-solid fa-trash-can"></i></div>
+                </div>
+                <textarea class="text_pole npcb-dx-text" rows="2" placeholder='e.g. "You speak as though you have a choice." *He leans forward.*'>${esc(d.text || '')}</textarea>
+            </div>`;
+        }).join('')}
+        <div class="menu_button npcb-dx-add"><i class="fa-solid fa-plus"></i> Add example</div>`);
+    };
+    const at = (el) => list[Number($(el).closest('.npcb-dx').data('i'))];
+    host.off('.dx');
+    host.on('click.dx', '.npcb-dx-add', () => { list.push({ kind: 'always', value: '', text: '' }); draw(); host.find('.npcb-dx-text').last().trigger('focus'); });
+    host.on('click.dx', '.npcb-dx-del', (e) => { list.splice(Number($(e.target).closest('.npcb-dx').data('i')), 1); draw(); });
+    host.on('change.dx', '.npcb-dx-kind', (e) => {
+        const d = at(e.target);
+        if (!d) return;
+        d.kind = String(e.target.value);
+        d.value = d.kind === 'mood' ? (states()[0] ?? '') : '';
+        draw();
+    });
+    host.on('input.dx change.dx', '.npcb-dx-value', (e) => { const d = at(e.target); if (d) d.value = String(e.target.value); });
+    host.on('input.dx', '.npcb-dx-text', (e) => { const d = at(e.target); if (d) d.text = String(e.target.value); });
+    draw();
+}
+
 function selectTemplate(id, isNew = false, tab = 'card') {
     if (tab === 'outfit') tab = 'wardrobe';
     resetAssistFor(isNew ? '__new__' : id);
@@ -2054,6 +2119,7 @@ function selectTemplate(id, isNew = false, tab = 'card') {
     const present = hasChat() && !isNew && currentRoster().some(i => i.id === t.id);
     libDraftWardrobe = clone({ wardrobe: t.wardrobe || [], defaultWorn: t.defaultWorn || [] });
     libDraftExt = clone(t.ext || {});
+    libDraftDialogue = clone(t.dialogue || []);
     const extTabs = [...extensions.values()].filter(x => x.cardTab);
     ed.html(`
       <div class="npcb-tabs"><div class="npcb-tab ${tab === 'card' ? 'active' : ''}" data-tab="card">Card</div><div class="npcb-tab ${tab === 'wardrobe' ? 'active' : ''}" data-tab="wardrobe">Wardrobe (${(t.wardrobe || []).length})</div>${extTabs.map(x => `<div class="npcb-tab ${tab === `ext:${x.id}` ? 'active' : ''}" data-tab="ext:${esc(x.id)}">${esc(x.cardTab.label || x.id)}</div>`).join('')}</div>
@@ -2085,6 +2151,10 @@ function selectTemplate(id, isNew = false, tab = 'card') {
         <textarea class="text_pole npcb-ed-desc" rows="3">${esc(t.description)}</textarea></label>
       <label>Details <small class="npcb-dim">(sent to the LLM while this NPC is in the scene)</small>
         <textarea class="text_pole npcb-ed-details" rows="10">${esc(t.details)}</textarea></label>
+      <div class="npcb-dx-wrap">
+        <div><b>Dialogue examples</b> <small class="npcb-dim">(sent to the LLM; mood examples only while this NPC is in that mood)</small></div>
+        <div class="npcb-dx-host"></div>
+      </div>
       <div class="npcb-ed-traits">
         <div><b>Identity</b> <small class="npcb-dim">(used to tell same-name characters apart; empty fields fall back to searching the Details text)</small></div>
         ${traitKeys.map(k => `<label>${esc(k)}<input class="text_pole npcb-ed-trait" data-key="${esc(k)}" value="${esc(t.traits?.[k] ?? '')}"></label>`).join('')}
@@ -2113,6 +2183,7 @@ function selectTemplate(id, isNew = false, tab = 'card') {
 
     ed.off('.npcb');
     bindTabs(ed);
+    mountDialogueExamples(ed.find('.npcb-dx-host'), libDraftDialogue);
     ed.on('click.npcb', '.npcb-tab', () => renderAssist());
     ed.on('click.npcb', '.npcb-ed-export', () => exportNpcs([lib()[t.id]].filter(Boolean), `${t.id}.npcbook.json`));
     libWardrobeUi = mountWardrobe(ed.find('.npcb-wd-host'), libDraftWardrobe, {
@@ -2245,6 +2316,7 @@ async function saveTemplateFromEditor(t, isNew) {
         sexualExperience: String(ed.find('.npcb-ed-sexexp').val() ?? '').trim(),
         color: color.toLowerCase(),
         wardrobe: (libDraftWardrobe?.wardrobe ?? t.wardrobe ?? []).filter(i => i.name.trim()),
+        dialogue: libDraftDialogue.filter(d => String(d.text ?? '').trim()).map(d => ({ kind: d.kind || 'always', value: String(d.value ?? '').trim(), text: String(d.text).trim() })),
         ext: clone(libDraftExt || t.ext || {}),
         defaultWorn: (libDraftWardrobe?.defaultWorn ?? t.defaultWorn ?? []),
         auto: isNew ? false : !!t.auto,
@@ -2424,7 +2496,7 @@ async function importLibrary(e) {
             let id = String(raw.id || '').toLowerCase();
             if (!ID_PATTERN.test(id)) id = slugify(raw.name);
             if (lib()[id]) { id = uniqueId(id, x => !!lib()[x]); renamed++; }
-            const npc = { portrait: '', description: '', details: '', traits: {}, height: '', pronouns: '', sexuality: '', sexualExperience: '', wardrobe: [], defaultWorn: [], ...raw, id, created: Date.now() };
+            const npc = { portrait: '', description: '', details: '', traits: {}, height: '', pronouns: '', sexuality: '', sexualExperience: '', wardrobe: [], defaultWorn: [], dialogue: [], ...raw, id, created: Date.now() };
             if (String(npc.portrait).startsWith('data:')) {
                 try { npc.portrait = await uploadPortrait(npc.portrait, id); } catch (err) { console.warn('[NPC Book] portrait upload failed, keeping it inline', err); }
             }
