@@ -13,7 +13,6 @@ To prevent LLM Hallucination drift (User is standing, hair swaying in the wind, 
 - Profile generation if a character doesn't have one already.
 - Vibe coded because I hate making extensions.
 
-
 ![NPC Book creation](image1.png)
 ![During chat pop-up and NPC listing](image2.png)
 
@@ -64,3 +63,7 @@ characters[
 
 ## Sister extensions
 NPC Book can be extended by other extensions, which can add their own tabs to NPC cards and your persona, and their own information to what the AI sees. See *NPC Book — GURPS* for an example.
+
+
+## Existing sister extensions:
+- [Gurps Stat-sheet](https://github.com/lalzy/ST-NPCBook-Gurps)
