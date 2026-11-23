@@ -33,44 +33,84 @@ function toTrackerList(json) {
 }
 
 /**
- * Find the tracker block(s) in a message.
- * Normal case: one <npcs>...</npcs> block, which is removed from the text.
- * Smaller models sometimes forget the tags (a bare [{"id": ...}] array at the end) or "correct" themselves
- * several times ("Wait, let me fix that…" + another array). Then everything from the first attempt to the end
- * of the message is removed, and the last attempt that parses is used.
+ * Rescue the intact top-level {...} objects from broken JSON, e.g. an array where one entry is malformed
+ * ("gender": 48, 48) or the generation was cut off mid-array. Broken objects are skipped.
+ */
+export function salvageObjects(text) {
+    const s = String(text ?? '');
+    const out = [];
+    let depth = 0;
+    let inStr = false;
+    let start = -1;
+    for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (inStr) { if (ch === '\\') i++; else if (ch === '"') inStr = false; continue; }
+        if (ch === '"') { inStr = true; continue; }
+        if (ch === '{') { if (depth === 0) start = i; depth++; }
+        else if (ch === '}' && depth > 0) {
+            depth--;
+            if (depth === 0 && start >= 0) {
+                try { const o = parseLenientJson(s.slice(start, i + 1)); if (o && typeof o === 'object' && !Array.isArray(o)) out.push(o); } catch { /* skip broken entry */ }
+                start = -1;
+            }
+        }
+    }
+    return out;
+}
+
+/**
+ * Find the tracker block in a message.
+ * Normal case: one <npcs>...</npcs> block at the end, which is removed from the text.
+ * Smaller models sometimes forget the tags (a bare [{"id": ...}] array), forget a closing tag, "correct" themselves
+ * several times ("Wait, let me fix that…" + another array), break one entry, or get cut off mid-array.
+ * Then everything from the first attempt to the end of the message is removed, and the LAST array that yields
+ * entries is used: parsed whole if it is valid JSON, otherwise its intact entries are rescued one by one.
  * Returns { found, json, raw, cleaned, error }.
  */
 export function extractTracker(text) {
     const src = String(text ?? '');
-    const attempts = [];
-    const tagRe = new RegExp(`<${TRACKER_TAG}>([\\s\\S]*?)(?:</${TRACKER_TAG}>|$)`, 'gi');
-    const tagged = [];
+    const tagAt = src.search(/<npcs>/i);
+    const bare = /(^|\n)[ \t]*(?=\[\s*\{\s*"(?:id|name)"\s*:)/.exec(src);
+    const bareAt = bare ? bare.index + bare[1].length : -1;
+    const starts = [tagAt, bareAt].filter(x => x >= 0);
+    if (!starts.length) return { found: false, json: null, raw: '', cleaned: src, error: null };
+    const start = Math.min(...starts);
+
+    // Every top-level array from the first attempt on (arrays inside entries, e.g. a wardrobe, are skipped).
+    const arrays = [];
+    const re = /\[\s*[{\]]/g;
+    re.lastIndex = start;
     let m;
-    while ((m = tagRe.exec(src)) !== null) {
-        if (m[0].length === 0) { tagRe.lastIndex++; continue; }
-        tagged.push({ start: m.index, end: m.index + m[0].length });
-        attempts.push({ start: m.index, raw: m[1] });
+    while ((m = re.exec(src)) !== null) {
+        const close = matchBracket(src, m.index);
+        const end = close < 0 ? src.length : close + 1;
+        arrays.push(src.slice(m.index, end));
+        if (close < 0) break;
+        re.lastIndex = end;
     }
-    const bareRe = /(^|\n)[ \t]*(?=\[\s*\{\s*"(?:id|name)"\s*:)/g;
-    while ((m = bareRe.exec(src)) !== null) {
-        const start = m.index + m[1].length;
-        if (tagged.some(t => start >= t.start && start < t.end)) continue;
-        const close = matchBracket(src, start);
-        attempts.push({ start, raw: src.slice(start, close < 0 ? src.length : close + 1), bare: true });
-        if (m[0].length === 0) bareRe.lastIndex++;
-    }
-    if (!attempts.length) return { found: false, json: null, raw: '', cleaned: src, error: null };
-    attempts.sort((x, y) => x.start - y.start);
-    const single = attempts.length === 1 && !attempts[0].bare;
-    const cleaned = (single ? src.replace(tagRe, '') : src.slice(0, attempts[0].start)).replace(/\n{3,}/g, '\n\n').trimEnd();
+
+    // One clean block followed by nothing tracker-like: remove just that block. Otherwise drop the whole tail.
+    const blocks = src.match(/<npcs>[\s\S]*?<\/npcs>/gi) || [];
+    const single = tagAt === start && blocks.length === 1 && arrays.length <= 1 && (src.match(/<npcs>/gi) || []).length === 1;
+    const cleaned = (single ? src.replace(/<npcs>[\s\S]*?<\/npcs>/i, '') : src.slice(0, start)).replace(/\n{3,}/g, '\n\n').trimEnd();
+
     let error = null;
-    for (let i = attempts.length - 1; i >= 0; i--) {
+    for (let i = arrays.length - 1; i >= 0; i--) {
         try {
-            const json = toTrackerList(parseLenientJson(attempts[i].raw));
-            if (Array.isArray(json)) return { found: true, json, raw: attempts[i].raw, cleaned, error: null };
+            const json = toTrackerList(parseLenientJson(arrays[i]));
+            if (Array.isArray(json)) return { found: true, json, raw: arrays[i], cleaned, error: null };
         } catch (e) { error = error ?? (e?.message || String(e)); }
+        const rescued = salvageObjects(arrays[i]);
+        if (rescued.length) return { found: true, json: rescued, raw: arrays[i], cleaned, error: null };
     }
-    return { found: true, json: null, raw: attempts[attempts.length - 1].raw, cleaned, error };
+    // No array at all, e.g. <npcs>{"id": "a"}</npcs> or <npcs>{"npcs": …}</npcs>.
+    const bodies = [...src.matchAll(/<npcs>([\s\S]*?)(?:<\/npcs>|(?=<npcs>)|$)/gi)].map(x => x[1]).reverse();
+    for (const body of bodies) {
+        try { const json = toTrackerList(parseLenientJson(body)); if (Array.isArray(json)) return { found: true, json, raw: body, cleaned, error: null }; } catch (e) { error = error ?? (e?.message || String(e)); }
+        const rescued = salvageObjects(body);
+        if (rescued.length) return { found: true, json: rescued, raw: body, cleaned, error: null };
+    }
+    return { found: true, json: null, raw: src.slice(start), cleaned, error };
 }
 
 export function parseLenientJson(raw) {
@@ -84,8 +124,30 @@ export function parseLenientJson(raw) {
     const end = Math.max(endArr, endObj);
     if (end >= 0) s = s.slice(0, end + 1);
     s = s.replace(/[“”]/g, '"').replace(/[‘’]/g, '\'');
-    s = s.replace(/,\s*([}\]])/g, '$1');
-    return JSON.parse(s);
+    return JSON.parse(stripTrailingCommas(s));
+}
+
+/** Remove trailing commas before } or ] (models write them a lot); commas inside strings are left alone. */
+export function stripTrailingCommas(json) {
+    const s = String(json ?? '');
+    let out = '';
+    let inStr = false;
+    for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (inStr) {
+            out += ch;
+            if (ch === '\\') { out += s[i + 1] ?? ''; i++; } else if (ch === '"') inStr = false;
+            continue;
+        }
+        if (ch === '"') { inStr = true; out += ch; continue; }
+        if (ch === ',') {
+            let j = i + 1;
+            while (j < s.length && /\s/.test(s[j])) j++;
+            if (s[j] === '}' || s[j] === ']') continue;
+        }
+        out += ch;
+    }
+    return out;
 }
 
 function words(s) {
@@ -574,14 +636,14 @@ export function extractCharacterList(text) {
         let start = m.index;
         let end = close + 1;
         const before = src.slice(0, start).match(/\{\s*$/);
-        const after = src.slice(end).match(/^\s*\}/);
+        const after = src.slice(end).match(/^\s*,?\s*\}/);
         if (before && !after) return fail('the JSON block may only contain "characters"');
         if (before && after) { start -= before[0].length; end += after[0].length; }
         const fb = src.slice(0, start).match(/```[a-z]*\s*$/i);
         const fa = src.slice(end).match(/^\s*```/);
         if (fb && fa) { start -= fb[0].length; end += fa[0].length; }
         let entries;
-        try { entries = castEntries(JSON.parse(src.slice(open, close + 1))); } catch (e) { return fail(e?.message || String(e)); }
+        try { entries = castEntries(JSON.parse(stripTrailingCommas(src.slice(open, close + 1)))); } catch (e) { return fail(e?.message || String(e)); }
         const cleaned = (src.slice(0, start) + src.slice(end)).replace(/\n{3,}/g, '\n\n').trim();
         return { found: true, entries, cleaned, error: null };
     }

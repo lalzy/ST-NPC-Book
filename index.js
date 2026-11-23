@@ -22,10 +22,10 @@ const DEFAULT_INSTRUCTIONS = `[Scene tracking]
 Write your reply as usual. Then, at the very end, add one <npcs> block that records what CHANGED in the scene during your reply. Do not explain or plan the block; just write it.
 
 Put in the block:
-- A character already in the scene whose posture, state, feelings or clothing changed: their "id" and only the fields that changed.
+- A character already in the scene whose posture, state, feelings or clothing changed in your reply: their "id" and only the fields that changed. Compare with the scene: if a character's mood in your reply no longer matches their listed state (listed Calm, but your reply shows cold anger), that is a change, so give the new state.
 - A character who arrived: their "id" from Known NPCs, plus "posture" and "state". Someone not in Known NPCs (or a different person who shares a name) gets "name" and "new": true, plus "traits" with [[TRAIT_KEYS]] and the profile fields shown in the example.
 - A character who left: {"id": "...", "left": true}.
-- Leave out everyone and everything that did not change. If you are not sure something changed, leave it out. If nothing changed, write <npcs>[]</npcs>.
+- Report only what your reply actually shows. Leave out everyone and everything that did not change. If nothing changed, write <npcs>[]</npcs>.
 - Never list [[EXCLUDE]].
 
 Values:
@@ -173,7 +173,7 @@ const DEFAULTS = {
     trackChar: true,
     traitKeys: ['race', 'age', 'gender', 'role'],
     postures: ['Standing', 'Sitting', 'Lying down', 'Kneeling', 'Crouching', 'Leaning', 'Walking', 'Running'],
-    states: ['Calm', 'Happy', 'Excited', 'Curious', 'Nervous', 'Afraid', 'Angry', 'Sad', 'Tired', 'Injured', 'Asleep', 'Unconscious'],
+    states: ['Calm', 'Happy', 'Amused', 'Excited', 'Curious', 'Suspicious', 'Determined', 'Stern', 'Annoyed', 'Angry', 'Nervous', 'Embarrassed', 'Afraid', 'Sad', 'Tired', 'Injured', 'Asleep', 'Unconscious'],
     rosterCollapsed: false,
     trackUser: true,
     speakerPortraits: true,
