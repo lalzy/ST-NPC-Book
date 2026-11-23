@@ -172,6 +172,35 @@ export function resolveEntry(entry, { library, presentIds = [], threshold = 0.5,
     return { id: null, reason: 'data-mismatch', score: 0 };
 }
 
+/** Default pronouns from a gender value: male → he/him, female → she/her, otherwise ''. */
+export function defaultPronouns(gender) {
+    const w = normalize(gender).split(' ');
+    if (w.some(x => ['female', 'woman', 'girl', 'f'].includes(x))) return 'she/her';
+    if (w.some(x => ['male', 'man', 'boy', 'm'].includes(x))) return 'he/him';
+    return '';
+}
+
+/** Card profile fields (not identity traits: never used for matching). */
+export const PROFILE_FIELDS = [
+    { key: 'height', label: 'Height', attr: 'height' },
+    { key: 'pronouns', label: 'Pronouns', attr: 'pronouns' },
+    { key: 'sexualExperience', label: 'Sexual experience', attr: 'sexual_experience' },
+];
+
+/** Read profile fields from an LLM tracker entry (top level or inside "traits"). */
+export function profileFromEntry(entry) {
+    const tr = entry?.traits || {};
+    const pick = (...vals) => String(vals.find(v => v !== undefined && v !== null && String(v).trim() !== '') ?? '').trim();
+    const gender = Object.entries(tr).find(([k]) => normalize(k) === 'gender')?.[1];
+    return {
+        height: pick(entry?.height, tr.height),
+        pronouns: pick(entry?.pronouns, tr.pronouns) || defaultPronouns(gender),
+        sexualExperience: pick(entry?.sexual_experience, entry?.sexualExperience, tr.sexual_experience, tr.sexualExperience),
+    };
+}
+
+const PROFILE_TRAIT_KEYS = new Set(['height', 'pronouns', 'sexual_experience', 'sexualexperience']);
+
 export function pickEnum(value, list, fallback) {
     if (value === undefined || value === null || String(value).trim() === '') return fallback;
     const v = normalize(value);
@@ -212,7 +241,11 @@ export function applyTracker(list, prevRoster, { library, threshold, numericTole
             const newId = uniqueId(entry.id || nm, x => !!lib[x]);
             const traits = {};
             for (const k of traitKeys) traits[k] = '';
-            for (const [k, v] of Object.entries(entry.traits || {})) traits[normalize(k).replace(/\s+/g, '_')] = String(v ?? '');
+            for (const [k, v] of Object.entries(entry.traits || {})) {
+                const key = normalize(k).replace(/\s+/g, '_');
+                if (PROFILE_TRAIT_KEYS.has(key)) continue; // stored as card fields, not identity traits
+                traits[key] = String(v ?? '');
+            }
             const wb = buildWardrobe(entry.wardrobe);
             const initial = applyOutfitChange([], wb.wardrobe, normOutfitChange(entry), conditions).outfit;
             const t = {
@@ -222,6 +255,7 @@ export function applyTracker(list, prevRoster, { library, threshold, numericTole
                 description: String(entry.description ?? '').trim(),
                 details: String(entry.details ?? entry.description ?? '').trim(),
                 traits,
+                ...profileFromEntry(entry),
                 wardrobe: wb.wardrobe,
                 defaultWorn: initial.map(w => w.id),
                 auto: true,

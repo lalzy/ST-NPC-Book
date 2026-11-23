@@ -4,7 +4,8 @@
 import {
     extractTracker, applyTracker, uniqueId, slugify, ID_PATTERN, normalize, pickEnum,
     extractCharacterList, resolveRef, normColor, exposureSummary,
-    SLOTS, STACKING_SLOTS, applyOutfitChange, outfitFromDefault, outfitBySlot, wearItem, findItem, normOutfitChange, inferSlots,
+    defaultPronouns, PROFILE_FIELDS,
+    SLOTS, applyOutfitChange, outfitFromDefault, outfitBySlot, wearItem, findItem, normOutfitChange, inferSlots,
 } from './logic.js';
 import { promptManager } from '../../../openai.js';
 import { user_avatar, getUserAvatar } from '../../../personas.js';
@@ -21,7 +22,7 @@ At the very end of EVERY reply, output one <npcs> block listing every character 
 - Characters who left the scene must be omitted. Characters who arrived must be added.
 - If nobody is present, output <npcs>[]</npcs>.
 - Reuse the exact "id" of a character already present, or listed under Known NPCs, ONLY if it is the same person (same identity: [[TRAIT_KEYS]]). Someone who merely shares a name is a different, NEW character.
-- For a character that is not present and not listed, add "new": true plus "description" (one line) and "details" (full profile: appearance, personality, background, manner of speech).
+- For a character that is not present and not listed, add "new": true plus "description" (one line), "details" (full profile: appearance, personality, background, manner of speech), "height", "pronouns" and "sexual_experience".
 - Always include "traits" with: [[TRAIT_KEYS]].
 - "posture" must be one of: [[POSTURES]]
 - "state" must be one of: [[STATES]]
@@ -48,6 +49,11 @@ const DEFAULT_OUTFIT_RULES = `Clothing:
 - For a NEW character also add "wardrobe": 4-8 items that fit them, as [{"name": "...", "slots": ["..."]}], and "outfit": {"wear": ["item name", ...]} for what they wear right now. Slots: [[SLOTS]]`;
 
 const DEFAULT_COLOR_RULE = `Dialogue colors:
+- In your reply (outside the <npcs> block), wrap every line of spoken dialogue in <font color=HEX data-npc="ID">"..."</font> using the speaking character's Dialogue color and exact id from the scene, e.g. <font color=#e6a0c4 data-npc="seraphina">"Hello there."</font>
+- Use the exact color and id listed for that character. Characters without a Dialogue color get no font tag.`;
+
+/** Previous default color rule (no data-npc). Saved settings still equal to it are upgraded automatically. */
+const DEFAULT_COLOR_RULE_V1 = `Dialogue colors:
 - In your reply (outside the <npcs> block), wrap every line of spoken dialogue in <font color=HEX>"..."</font> using the speaking character's Dialogue color from the scene, e.g. <font color=#e6a0c4>"Hello there."</font>
 - Use the exact color listed for that character. Characters without a Dialogue color get no font tag.`;
 
@@ -195,6 +201,13 @@ function settings() {
     if (JSON.stringify(s.traitKeys) === JSON.stringify(['age', 'gender', 'role'])) s.traitKeys = ['race', 'age', 'gender', 'role'];
     if (!s.portraitTemplateV2 && s.portraitLlmPrompt === DEFAULT_PORTRAIT_LLM_PROMPT_V1) s.portraitLlmPrompt = DEFAULT_PORTRAIT_LLM_PROMPT;
     s.portraitTemplateV2 = true;
+    if (s.colorRule === DEFAULT_COLOR_RULE_V1) s.colorRule = DEFAULT_COLOR_RULE;
+    if (typeof s.instructions === 'string' && !s.instructions.includes('"sexual_experience"')) {
+        s.instructions = s.instructions.replace(
+            'plus "description" (one line) and "details" (full profile: appearance, personality, background, manner of speech).',
+            'plus "description" (one line), "details" (full profile: appearance, personality, background, manner of speech), "height", "pronouns" and "sexual_experience".',
+        );
+    }
     if (typeof s.instructions === 'string' && !s.instructions.includes('[[COLOR_RULE]]')) {
         if (s.instructions.includes('[[OUTFIT_RULES]]')) s.instructions = s.instructions.replace('[[OUTFIT_RULES]]', '[[COLOR_RULE]]\n[[OUTFIT_RULES]]');
         else s.instructions += '\n[[COLOR_RULE]]';
@@ -364,6 +377,15 @@ function avatarHtml(t, name, cls = '') {
         : `<div class="npcb-ava npcb-ava-fallback ${cls}">${esc(initials(name))}</div>`;
 }
 
+/** Profile fields of a card; pronouns fall back to the gender default when empty. */
+function profileOf(t) {
+    return {
+        height: String(t?.height ?? '').trim(),
+        pronouns: String(t?.pronouns ?? '').trim() || defaultPronouns(t?.traits?.gender),
+        sexualExperience: String(t?.sexualExperience ?? '').trim(),
+    };
+}
+
 function traitSummary(t) {
     const tr = t?.traits || {};
     return settings().traitKeys.map(k => tr[k]).filter(v => v && String(v).trim()).join(', ');
@@ -446,7 +468,9 @@ function buildCharBlock(inst) {
     const t = templateFor(inst);
     const name = t?.name ?? inst.name ?? inst.id;
     const inner = [];
-    const idAttrs = s.traitKeys.map(k => (t?.traits?.[k] ? ` ${k}="${xa(t.traits[k])}"` : '')).join('');
+    const prof = profileOf(t);
+    const idAttrs = s.traitKeys.map(k => (t?.traits?.[k] ? ` ${k}="${xa(t.traits[k])}"` : '')).join('')
+        + PROFILE_FIELDS.map(f => (prof[f.key] ? ` ${f.attr}="${xa(prof[f.key])}"` : '')).join('');
     if (idAttrs) inner.push(`<identity${idAttrs}/>`);
     const details = (t?.details ?? '').trim();
     if (details) inner.push(`<details>${xt(details)}</details>`);
@@ -525,12 +549,22 @@ function registerMacros() {
         ['npcScene', 'NPC Book: details + live state of NPCs present in this chat (empty if none).', buildSceneText],
         ['npcInstructions', 'NPC Book: tracking instructions for the LLM.', buildInstructionText],
     ];
+    // Never let a macro fail silently: log the error and show one toast per macro per session.
+    const warned = new Set();
+    const safe = (name, fn) => () => {
+        try { return fn(); } catch (e) {
+            console.error(`[NPC Book] {{${name}}} failed`, e);
+            if (!warned.has(name)) { warned.add(name); toastr.error(`{{${name}}} failed: ${e?.message || e}. See browser console.`, 'NPC Book'); }
+            return '';
+        }
+    };
     for (const [name, description, fn] of defs) {
+        const handler = safe(name, fn);
         try {
-            if (c.macros?.register) c.macros.register(name, { category: 'NPC Book', description, handler: () => fn() });
-            else c.registerMacro(name, () => fn(), description);
+            if (c.macros?.register) c.macros.register(name, { category: 'NPC Book', description, handler });
+            else c.registerMacro(name, handler, description);
         } catch (e) {
-            try { c.registerMacro(name, () => fn(), description); } catch (e2) { console.error('[NPC Book] macro registration failed', e2); }
+            try { c.registerMacro(name, handler, description); } catch (e2) { console.error('[NPC Book] macro registration failed', e2); }
         }
     }
 }
@@ -601,6 +635,39 @@ function renderPmStatus() {
 
 // ───────────────────────── generation hooks ─────────────────────────
 
+/** True when no user message comes before chat[idx] (i.e. it is a greeting / intro message). */
+function isGreetingIdx(idx) {
+    const chat = ctx().chat || [];
+    return idx >= 0 && chat.slice(0, idx).every(x => !x.is_user);
+}
+
+function newInstance(id) {
+    const s = settings();
+    const t = lib()[id];
+    return { id, name: t.name, posture: s.postures[0] ?? '', state: s.states[0] ?? '', feelings: '', outfit: outfitFromDefault(t.defaultWorn, t.wardrobe || [], s.conditions) };
+}
+
+/**
+ * Starting cast for regenerating a greeting: the given roster, plus the cast read from the greeting's
+ * characters[...] block (any swipe), plus the main character card when "Track the main character" is on.
+ */
+function greetingCast(idx, base) {
+    const s = settings();
+    const c = ctx();
+    const msg = (c.chat || [])[idx];
+    const roster = clone(base || []);
+    const has = (id) => roster.some(x => x.id === id);
+    const snaps = [snapOf(msg), ...(Array.isArray(msg?.swipe_info) ? msg.swipe_info.map(si => si?.extra?.[MODULE]) : [])].filter(Boolean);
+    const greet = snaps.find(x => x.greeting && Array.isArray(x.post) && x.post.length);
+    for (const inst of greet?.post || []) if (inst?.id && !has(inst.id)) roster.push(clone(inst));
+    const assistantMode = c.characterId === undefined && !c.groupId;
+    if (s.trackChar && !assistantMode && !c.groupId && c.name2) {
+        const id = resolveRef(c.name2, lib());
+        if (id && !has(id)) roster.push(newInstance(id));
+    }
+    return roster;
+}
+
 function onGenerationStarted(type, _opts, dryRun) {
     if (dryRun) { updateAutoInjection(); return; }
     const chat = ctx().chat || [];
@@ -610,7 +677,9 @@ function onGenerationStarted(type, _opts, dryRun) {
     if ((type === 'swipe' || type === 'continue') && last && !last.is_user) {
         const m = meta();
         const metaHit = m?.pre && m.pre.idx === lastIdx;
-        const pre = metaHit ? m.pre.roster : (snapOf(last)?.pre ?? rosterBefore(lastIdx));
+        let pre = metaHit ? m.pre.roster : (snapOf(last)?.pre ?? rosterBefore(lastIdx));
+        // Regenerating a greeting: the scene "before" it is empty, so seed it with the greeting's cast + the main character card.
+        if (isGreetingIdx(lastIdx)) pre = greetingCast(lastIdx, pre);
         const preUser = (metaHit && m.pre.user) ? m.pre.user : (snapOf(last)?.preUser ?? userBefore(lastIdx));
         genCtx = { type, pre: clone(pre), preUser: clone(adaptUser(preUser)), targetIdx: lastIdx };
     } else {
@@ -633,6 +702,7 @@ async function processLastMessage() {
     const exPeek = extractTracker(msg.mes);
     if (!exPeek.found && existing && existing.sig === sig(msg.mes)) return; // already processed
     processing = true;
+    let processed = null;
     try {
         const ex = exPeek;
         const pre = g.pre ?? rosterBefore(idx);
@@ -707,12 +777,15 @@ async function processLastMessage() {
         await c.saveChat();
         c.saveMetadataDebounced?.();
         if (ex.found) { try { c.updateMessageBlock(idx, msg); } catch (e) { console.warn('[NPC Book] re-render failed', e); } }
+        processed = { idx, swipeId: msg.swipe_id ?? 0, type: g.type || 'normal' };
     } catch (e) {
         console.error('[NPC Book] processing failed', e);
     } finally {
         processing = false;
         renderRoster();
     }
+    // Tell sister extensions (e.g. TTS) that this message is final: tracker block removed, scene saved.
+    if (processed) document.dispatchEvent(new CustomEvent('npcbook:message', { detail: processed }));
 }
 
 // ───────────────────────── first message: starting cast ─────────────────────────
@@ -805,6 +878,7 @@ function portraitData(t) {
     return {
         name: t.name,
         identity: labeled,
+        height: profileOf(t).height,
         description: String(t.description || '').trim(),
         traits: traitSummary(t),
         details: String(t.details || '').trim(),
@@ -867,6 +941,7 @@ async function portraitPromptFor(t) {
         'CHARACTER DATA',
         `Name: ${d.name}`,
         d.identity && `Identity: ${d.identity}`,
+        d.height && `Height: ${d.height}`,
         d.details && `Details: ${d.details}`,
         d.description && `Notes: ${d.description}`,
         d.outfit && `Wearing right now: ${d.outfit}`,
@@ -948,6 +1023,13 @@ function rosterAtMessage(idx) {
 }
 
 function speakerOfBlock(block, cmap) {
+    // 1) Explicit id from the LLM: <font color=... data-npc="id">
+    for (const el of block.querySelectorAll('[data-npc]')) {
+        if (el.closest('.npcb-speaker')) continue;
+        const id = resolveRef(el.getAttribute('data-npc'), lib());
+        if (id) return id;
+    }
+    // 2) Fallback: match by dialogue color
     const els = block.querySelectorAll('font[color], [style*="color"]');
     for (const el of els) {
         if (el.closest('.npcb-speaker')) continue;
@@ -1437,40 +1519,6 @@ async function openTemplateExtSheet(id, extId) {
     toastr.success(`Saved ${t.name}'s ${x.cardTab.label || x.id} sheet.`, 'NPC Book');
 }
 
-async function openPersonaExtSheet(extId) {
-    const c = ctx();
-    const x = extensions.get(extId);
-    if (!x?.personaSheet) return;
-    const p = personaData();
-    p.ext = p.ext || {};
-    const data = clone(p.ext[extId] ?? (typeof x.defaultData === 'function' ? x.defaultData() : {}));
-    const box = $(`<div class="npcb-ext-popup"><h3>${esc(c.name1)} — ${esc(x.personaSheet.label || x.id)}</h3><div class="npcb-ext-host"></div></div>`);
-    try { x.personaSheet.render(box.find('.npcb-ext-host'), { data, kind: 'user', name: c.name1 }); } catch (e) { console.error(e); }
-    const ok = await c.callGenericPopup(box, c.POPUP_TYPE.CONFIRM, '', { wide: true, large: true, allowVerticalScrolling: true, okButton: 'Save', cancelButton: 'Cancel' });
-    if (!ok) return;
-    p.ext[extId] = data;
-    save();
-    updateAutoInjection();
-}
-
-async function openPersonaWardrobe() {
-    const c = ctx();
-    const p = personaData();
-    const data = clone({ wardrobe: p.wardrobe, defaultWorn: p.defaultWorn });
-    const box = $(`<div class="npcb-wd-popup"><h3>${esc(c.name1)}'s wardrobe</h3><div class="npcb-wd-host"></div></div>`);
-    mountWardrobeEditor(box.find('.npcb-wd-host'), data);
-    const ok = await c.callGenericPopup(box, c.POPUP_TYPE.CONFIRM, '', { wide: true, large: true, allowVerticalScrolling: true, okButton: 'Save', cancelButton: 'Cancel' });
-    if (!ok) return;
-    p.wardrobe = data.wardrobe.filter(i => i.name.trim());
-    p.defaultWorn = data.defaultWorn.filter(id => p.wardrobe.some(i => i.id === id));
-    save();
-    // drop worn items that no longer exist
-    const u = currentUser();
-    let outfit = (u.outfit || []).filter(w => p.wardrobe.some(i => i.id === w.id));
-    if (!outfit.length) outfit = outfitFromDefault(p.defaultWorn, p.wardrobe, settings().conditions);
-    writeCurrentRoster(null, { ...u, outfit, dressed: outfit.length > 0 });
-}
-
 // ───────────────────────── NPC Library (top bar) ─────────────────────────
 
 let libSelected = null;
@@ -1597,6 +1645,12 @@ function selectTemplate(id, isNew = false, tab = 'card') {
         <div><b>Identity</b> <small class="npcb-dim">(used to tell same-name characters apart; empty fields fall back to searching the Details text)</small></div>
         ${traitKeys.map(k => `<label>${esc(k)}<input class="text_pole npcb-ed-trait" data-key="${esc(k)}" value="${esc(t.traits?.[k] ?? '')}"></label>`).join('')}
       </div>
+      <div class="npcb-ed-traits npcb-ed-profile">
+        <div><b>Profile</b> <small class="npcb-dim">(sent to the LLM; not used for matching)</small></div>
+        <label>Height<input class="text_pole npcb-ed-height" value="${esc(t.height ?? '')}" placeholder="e.g. 170 cm, tall"></label>
+        <label>Pronouns<input class="text_pole npcb-ed-pronouns" value="${esc(String(t.pronouns ?? '').trim() || defaultPronouns(t.traits?.gender))}" data-auto="${String(t.pronouns ?? '').trim() ? '0' : '1'}" placeholder="he/him, she/her, they/them"></label>
+        <label>Sexual experience<input class="text_pole npcb-ed-sexexp" value="${esc(t.sexualExperience ?? '')}" placeholder="e.g. virgin, experienced"></label>
+      </div>
       </div>
       <div class="npcb-tabpane" data-pane="outfit" ${tab === 'outfit' ? '' : 'style="display:none"'}>
         <small class="npcb-dim">What this NPC wears when entering a scene, and what portraits are generated with from the library. During a story, the outfit they currently wear is used instead. Click a slot to pick from the wardrobe.</small>
@@ -1687,6 +1741,12 @@ function selectTemplate(id, isNew = false, tab = 'card') {
         if (HEX_RE.test(v)) { ed.find('.npcb-ed-color').val(v); ed.find('.npcb-color-preview').css('color', v); }
         else if (!v) ed.find('.npcb-color-preview').css('color', 'inherit');
     });
+    // Pronouns follow the gender field (male → he/him, female → she/her) until edited by hand.
+    ed.on('input.npcb', '.npcb-ed-pronouns', (e) => { e.target.dataset.auto = '0'; });
+    ed.on('input.npcb', '.npcb-ed-trait[data-key="gender"]', (e) => {
+        const p = ed.find('.npcb-ed-pronouns');
+        if (p.attr('data-auto') !== '0') p.val(defaultPronouns(e.target.value));
+    });
     ed.on('click.npcb', '.npcb-ed-save', () => saveTemplateFromEditor(t, isNew));
     ed.on('click.npcb', '.npcb-ed-scene', () => {
         if (!hasChat()) { toastr.warning('Open a chat first.', 'NPC Book'); return; }
@@ -1739,6 +1799,9 @@ async function saveTemplateFromEditor(t, isNew) {
         description: String(ed.find('.npcb-ed-desc').val() ?? ''),
         details: String(ed.find('.npcb-ed-details').val() ?? ''),
         traits,
+        height: String(ed.find('.npcb-ed-height').val() ?? '').trim(),
+        pronouns: String(ed.find('.npcb-ed-pronouns').val() ?? '').trim(),
+        sexualExperience: String(ed.find('.npcb-ed-sexexp').val() ?? '').trim(),
         color: color.toLowerCase(),
         wardrobe: (libDraftWardrobe?.wardrobe ?? t.wardrobe ?? []).filter(i => i.name.trim()),
         ext: clone(libDraftExt || t.ext || {}),
@@ -1863,27 +1926,6 @@ async function openServerImagePicker() {
     return chosen;
 }
 
-function resizeImage(file, max) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onerror = reject;
-        reader.onload = () => {
-            const img = new Image();
-            img.onerror = reject;
-            img.onload = () => {
-                const scale = Math.min(1, max / Math.max(img.width, img.height));
-                const cv = document.createElement('canvas');
-                cv.width = Math.round(img.width * scale);
-                cv.height = Math.round(img.height * scale);
-                cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
-                resolve(cv.toDataURL('image/webp', 0.9));
-            };
-            img.src = String(reader.result);
-        };
-        reader.readAsDataURL(file);
-    });
-}
-
 async function uploadPortrait(dataUrl, id) {
     const m = String(dataUrl).match(/^data:image\/(\w+);base64,(.+)$/);
     if (!m) throw new Error('bad data url');
@@ -1921,7 +1963,7 @@ async function importLibrary(e) {
             let id = String(raw.id || '').toLowerCase();
             if (!ID_PATTERN.test(id)) id = slugify(raw.name);
             if (lib()[id]) { id = uniqueId(id, x => !!lib()[x]); renamed++; }
-            lib()[id] = { portrait: '', description: '', details: '', traits: {}, ...raw, id, created: raw.created || Date.now() };
+            lib()[id] = { portrait: '', description: '', details: '', traits: {}, height: '', pronouns: '', sexualExperience: '', ...raw, id, created: raw.created || Date.now() };
             added++;
         }
         save();
@@ -2050,7 +2092,7 @@ jQuery(async () => {
     decorateAll();
     ensurePersonaButton();
     window.NPCBook = {
-        version: 2,
+        version: 3,
         /**
          * Register a sister extension.
          * def = { id, label?, defaultData?(), cardTab?: { label, render(host, {data, template, isNew, kind}) },
@@ -2074,6 +2116,10 @@ jQuery(async () => {
             roster: hasChat() ? currentRoster().map(i => ({ id: i.id, name: templateFor(i)?.name ?? i.name ?? i.id, template: templateFor(i) })) : [],
             userName: ctx().name1,
         }),
+        /** Who was in the scene at a chat message (for the last message: before + after it): [{ id, name, template }]. */
+        getRosterAt: (idx) => (hasChat() ? rosterAtMessage(Number(idx)) : []).map(id => ({ id, name: lib()[id]?.name ?? id, template: lib()[id] || null })),
+        /** Resolve an id or name (as written by the LLM in data-npc) to a library id, or null. */
+        resolveNpc: (ref) => resolveRef(ref, lib()),
         openPersonaCharacter,
         saveSettings: save,
         util: { esc, xa, xt, normalize, slugify, indent },
