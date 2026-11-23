@@ -132,12 +132,11 @@
 .mes_text div[data-npcb-turn] > [data-npcb-body] > :last-child { margin-bottom: 0; }
 #chat.npcb-cards-off .mes_text div[data-npcb-turn] { display: block; margin: 0; padding: 0; background: none; border: 0; }
 #chat.npcb-cards-off .mes_text div[data-npcb-turn] > [data-npcb-ava] { display: none; }
-/* fallback when the LLM left out the speaker blocks */
-.mes_text .npcb-has-speaker { display: flow-root; }
-.mes_text img.npcb-speaker { float: left; width: var(--npcb-ava-size, 40px) !important; height: var(--npcb-ava-size, 40px) !important; object-fit: cover; border-radius: 8px; margin: 2px 10px 4px 0; border: 1px solid var(--SmartThemeBorderColor); }
+#chat:not(.npcb-colors-off) .mes_text div[data-npcb-turn].npcb-colored q,
+#chat:not(.npcb-colors-off) .mes_text div[data-npcb-turn].npcb-colored q * { color: var(--npcb-c) !important; }
 
 /* portrait tools */
-.npcb-ava, .mes_text img.npcb-speaker { object-position: 50% 22%; }
+.npcb-ava { object-position: 50% 22%; }
 .npcb-popover.npcb-menu { width: 230px; gap: 2px; padding: 6px; }
 .npcb-menu-item { padding: 7px 8px; border-radius: 7px; cursor: pointer; }
 .npcb-menu-item:hover { background: rgba(255, 255, 255, .08); }

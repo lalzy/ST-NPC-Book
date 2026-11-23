@@ -27,7 +27,6 @@ At the very end of EVERY reply, output one <npcs> block listing every character 
 - "posture" must be one of: [[POSTURES]]
 - "state" must be one of: [[STATES]]
 - "feelings" is the character's private inner thoughts right now (1-2 sentences).
-[[COLOR_RULE]]
 [[SPEAKER_RULE]]
 [[OUTFIT_RULES]]
 
@@ -49,18 +48,10 @@ const DEFAULT_OUTFIT_RULES = `Clothing:
 - "condition" must be one of: [[CONDITIONS]]
 - For a NEW character also add "wardrobe": 4-8 items that fit them, as [{"name": "...", "slots": ["..."]}], and "outfit": {"wear": ["item name", ...]} for what they wear right now. Slots: [[SLOTS]]`;
 
-const DEFAULT_COLOR_RULE = `Dialogue colors:
-- In your reply (outside the <npcs> block), wrap every line of spoken dialogue in <font color=HEX data-npc="ID">"..."</font> using the speaking character's Dialogue color and exact id from the scene, e.g. <font color=#e6a0c4 data-npc="seraphina">"Hello there."</font>
-- Use the exact color and id listed for that character. Characters without a Dialogue color get no font tag.`;
-
 const DEFAULT_SPEAKER_RULE = `Speaker blocks:
 - Wrap each character's part of your reply (their actions, the narration about them and their dialogue) in <npc id="ID">...</npc>, using their exact id from the scene, e.g. <npc id="seraphina">She looks up from the herbs. "You're awake."</npc>
-- Start a new block whenever the focus moves to another character. Text that belongs to no one stays outside the blocks. Never nest blocks.`;
-
-/** Previous default color rule (no data-npc). Saved settings still equal to it are upgraded automatically. */
-const DEFAULT_COLOR_RULE_V1 = `Dialogue colors:
-- In your reply (outside the <npcs> block), wrap every line of spoken dialogue in <font color=HEX>"..."</font> using the speaking character's Dialogue color from the scene, e.g. <font color=#e6a0c4>"Hello there."</font>
-- Use the exact color listed for that character. Characters without a Dialogue color get no font tag.`;
+- Start a new block whenever the focus moves to another character. Text that belongs to no one stays outside the blocks. Never nest blocks.
+- Write dialogue in plain double quotes, without any HTML or font tags.`;
 
 const DEFAULT_PORTRAIT_LLM_PROMPT = `Describe {{name}}'s portrait for an image generator. Use the template below.
 
@@ -168,7 +159,6 @@ const DEFAULTS = {
     portraitLlmPrompt: DEFAULT_PORTRAIT_LLM_PROMPT,
     dialogueColors: true,
     describeExposure: true,
-    colorRule: DEFAULT_COLOR_RULE,
     speakerRule: DEFAULT_SPEAKER_RULE,
     trackOutfits: true,
     includeWardrobe: true,
@@ -207,16 +197,11 @@ function settings() {
     if (JSON.stringify(s.traitKeys) === JSON.stringify(['age', 'gender', 'role'])) s.traitKeys = ['race', 'age', 'gender', 'role'];
     if (!s.portraitTemplateV2 && s.portraitLlmPrompt === DEFAULT_PORTRAIT_LLM_PROMPT_V1) s.portraitLlmPrompt = DEFAULT_PORTRAIT_LLM_PROMPT;
     s.portraitTemplateV2 = true;
-    if (s.colorRule === DEFAULT_COLOR_RULE_V1) s.colorRule = DEFAULT_COLOR_RULE;
     if (typeof s.instructions === 'string' && !s.instructions.includes('"sexual_experience"')) {
         s.instructions = s.instructions.replace(
             'plus "description" (one line) and "details" (full profile: appearance, personality, background, manner of speech).',
             'plus "description" (one line), "details" (full profile: appearance, personality, background, manner of speech), "height", "pronouns" and "sexual_experience".',
         );
-    }
-    if (typeof s.instructions === 'string' && !s.instructions.includes('[[COLOR_RULE]]')) {
-        if (s.instructions.includes('[[OUTFIT_RULES]]')) s.instructions = s.instructions.replace('[[OUTFIT_RULES]]', '[[COLOR_RULE]]\n[[OUTFIT_RULES]]');
-        else s.instructions += '\n[[COLOR_RULE]]';
     }
     if (typeof s.instructions === 'string' && !s.instructions.includes('[[USER_EXAMPLE]]')) {
         s.instructions = s.instructions.replace('"feelings": "..."}\n]', '"feelings": "...", "outfit": {"wear": ["item_id"], "remove": ["item_id"]}}[[USER_EXAMPLE]]\n]');
@@ -484,7 +469,6 @@ function buildCharBlock(inst) {
     const stAttrs = [
         inst.posture && `posture="${xa(inst.posture)}"`,
         inst.state && `mood="${xa(inst.state)}"`,
-        s.dialogueColors && HEX_RE.test(t?.color || '') && `dialogue_color="${xa(t.color)}"`,
     ].filter(Boolean).join(' ');
     if (stAttrs) inner.push(`<state ${stAttrs}/>`);
     if (inst.feelings) inner.push(`<feelings>${xt(inst.feelings)}</feelings>`);
@@ -527,7 +511,6 @@ function buildInstructionText() {
         })
         : [];
     return String(s.instructions || '')
-        .replaceAll('[[COLOR_RULE]]', s.dialogueColors ? s.colorRule : '')
         .replaceAll('[[SPEAKER_RULE]]', s.enabled && s.speakerPortraits ? s.speakerRule : '')
         .replaceAll('[[OUTFIT_RULES]]', [s.trackOutfits ? s.outfitRules : '', s.trackUser ? DEFAULT_USER_RULE : '', ...extInstructions()].filter(Boolean).join('\n'))
         .replaceAll('[[USER_EXAMPLE]]', s.trackUser ? ',\n  {"id": "user", "posture": "..."}' : '')
@@ -1092,15 +1075,6 @@ function registerTurnFormatter() {
     }, { stage: mf.stage.AFTER_MARKDOWN, order: mf.order.LATE });
 }
 
-/** Map dialogue colour -> NPC id, preferring characters present at that message. */
-function colorMap(presentIds) {
-    const map = new Map();
-    const all = Object.values(lib()).filter(t => normColor(t.color));
-    all.sort((a, b) => (presentIds.includes(b.id) - presentIds.includes(a.id)));
-    for (const t of all) { const k = normColor(t.color); if (!map.has(k)) map.set(k, t.id); }
-    return map;
-}
-
 function rosterAtMessage(idx) {
     const chat = ctx().chat || [];
     for (let i = Math.min(idx, chat.length - 1); i >= 0; i--) {
@@ -1108,46 +1082,6 @@ function rosterAtMessage(idx) {
         if (sn && Array.isArray(sn.post)) return i === idx && sn.pre ? [...new Set([...sn.pre, ...sn.post].map(x => x.id))] : sn.post.map(x => x.id);
     }
     return [];
-}
-
-function speakerOfBlock(block, cmap) {
-    // 1) Explicit id from the LLM: <font color=... data-npc="id">
-    for (const el of block.querySelectorAll('[data-npc]')) {
-        if (el.closest('.npcb-speaker')) continue;
-        const id = resolveRef(el.getAttribute('data-npc'), lib());
-        if (id) return id;
-    }
-    // 2) Fallback: match by dialogue color
-    const els = block.querySelectorAll('font[color], [style*="color"]');
-    for (const el of els) {
-        if (el.closest('.npcb-speaker')) continue;
-        const col = normColor(el.getAttribute('color') || el.style?.color);
-        if (col && cmap.has(col)) return cmap.get(col);
-    }
-    return null;
-}
-
-/** Put (or remove, when id is null / has no portrait) the speaker portrait at the start of a block. */
-function placePortrait(block, id) {
-    const t = id ? lib()[id] : null;
-    if (id && t && !t.portrait) ensurePortrait(id);
-    const url = t?.portrait || '';
-    const existing = block.querySelector(':scope > img.npcb-speaker');
-    if (!url) {
-        if (existing) { existing.remove(); block.classList.remove('npcb-has-speaker'); }
-        return;
-    }
-    if (existing && existing.dataset.npc === id && existing.getAttribute('src') === url) return;
-    existing?.remove();
-    const img = document.createElement('img');
-    img.className = 'npcb-speaker';
-    img.dataset.npc = id;
-    img.src = url;
-    img.alt = t.name;
-    img.title = t.name;
-    if (normColor(t.color)) img.style.borderColor = t.color;
-    block.insertBefore(img, block.firstChild);
-    block.classList.add('npcb-has-speaker');
 }
 
 /** Fill the avatar box of a speaker card (portrait, or initials when there is none) and set its accent color. */
@@ -1169,7 +1103,9 @@ function decorateTurn(turn) {
         ava.style.backgroundImage = '';
         ava.textContent = initials(t?.name || raw);
     }
-    if (normColor(t?.color)) turn.style.setProperty('--npcb-c', t.color); else turn.style.removeProperty('--npcb-c');
+    const color = normColor(t?.color);
+    if (color) turn.style.setProperty('--npcb-c', color); else turn.style.removeProperty('--npcb-c');
+    turn.classList.toggle('npcb-colored', !!color);
 }
 
 /** Card on/off and avatar size, applied through CSS so themes can't override them. */
@@ -1177,38 +1113,14 @@ function applyCardStyle() {
     const s = settings();
     const size = Math.min(200, Math.max(16, Number(s.speakerPortraitSize) || 40));
     document.documentElement.style.setProperty('--npcb-ava-size', `${size}px`);
-    $('#chat').toggleClass('npcb-cards-off', !(s.enabled && s.speakerPortraits));
+    $('#chat').toggleClass('npcb-cards-off', !(s.enabled && s.speakerPortraits))
+        .toggleClass('npcb-colors-off', !(s.enabled && s.dialogueColors));
 }
 
 function decorateMessage(mesid) {
-    const s = settings();
-    const mesEl = document.querySelector(`#chat .mes[mesid="${mesid}"]`);
-    if (!mesEl) return;
-    const textEl = mesEl.querySelector('.mes_text');
+    const textEl = document.querySelector(`#chat .mes[mesid="${mesid}"] .mes_text`);
     if (!textEl) return;
-    const msg = (ctx().chat || [])[Number(mesid)];
-    const enabled = s.enabled && s.speakerPortraits && msg && !msg.is_user;
-
-    // 1) Speaker blocks: each block is a card; fill in its avatar.
-    const turns = Array.from(textEl.querySelectorAll('div[data-npcb-turn]'));
-    if (turns.length) {
-        for (const turn of turns) decorateTurn(turn);
-        return;
-    }
-
-    // 2) No speaker blocks (the LLM left them out): guess per paragraph from dialogue ids / colors.
-    const blocks = Array.from(textEl.children).filter(el => !el.classList.contains('npcb-speaker') && /^(P|DIV|BLOCKQUOTE|LI|UL|OL)$/.test(el.tagName));
-    const cmap = enabled ? colorMap(rosterAtMessage(Number(mesid))) : new Map();
-    let last = null;
-    for (const block of blocks) {
-        let want = null;
-        if (enabled) {
-            const sp = speakerOfBlock(block, cmap);
-            if (sp && sp !== last) want = sp;
-            if (sp) last = sp;
-        }
-        placePortrait(block, want);
-    }
+    for (const turn of textEl.querySelectorAll('div[data-npcb-turn]')) decorateTurn(turn);
 }
 
 function decorateAll() {
@@ -1235,7 +1147,6 @@ function observeChat() {
     new MutationObserver((muts) => {
         for (const m of muts) {
             const nodes = [...m.addedNodes];
-            if (nodes.length && nodes.every(n => n.nodeType === 1 && n.classList?.contains('npcb-speaker'))) continue;
             const mes = (m.target.nodeType === 1 ? m.target : m.target.parentElement)?.closest?.('.mes[mesid]');
             if (mes) scheduleDecorate(mes.getAttribute('mesid'));
             for (const n of nodes) if (n.nodeType === 1 && n.matches?.('.mes[mesid]')) scheduleDecorate(n.getAttribute('mesid'));
@@ -1754,7 +1665,7 @@ function selectTemplate(id, isNew = false, tab = 'card') {
           <label>ID ${isNew ? '<small class="npcb-dim">(unique, cannot be changed later)</small>' : '<small class="npcb-dim">(locked)</small>'}
             <input class="text_pole npcb-ed-id" value="${esc(t.id)}" ${isNew ? '' : 'disabled'} placeholder="auto from name"></label>
           <label>Name<input class="text_pole npcb-ed-name" value="${esc(t.name)}" placeholder="Display name"></label>
-          <label>Dialogue color <small class="npcb-dim">(the LLM wraps this character's dialogue in &lt;font color&gt;)</small>
+          <label>Dialogue color <small class="npcb-dim">(their dialogue in speaker cards, and their name in the scene bar)</small>
             <div class="npcb-row npcb-color-row">
               <input type="color" class="npcb-ed-color" value="${HEX_RE.test(t.color || '') ? t.color : '#ffffff'}">
               <input class="text_pole npcb-ed-colorhex" value="${esc(t.color || '')}" placeholder="#RRGGBB (empty = none)">
@@ -2146,6 +2057,7 @@ async function mountSettings() {
     bind('#npcb_trackuser', 'trackUser', 'checkbox');
     bind('#npcb_personainuser', 'personaInUser', 'checkbox');
     bind('#npcb_dialoguecolors', 'dialogueColors', 'checkbox');
+    root.find('#npcb_dialoguecolors').on('change', applyCardStyle);
     bind('#npcb_speakerportraits', 'speakerPortraits', 'checkbox');
     bind('#npcb_speakersize', 'speakerPortraitSize', 'number');
     bind('#npcb_autoportraits', 'autoPortraits', 'checkbox');
@@ -2157,10 +2069,8 @@ async function mountSettings() {
     bind('#npcb_portraitllm', 'portraitLlmPrompt');
     root.find('#npcb_reset_portraitllm').on('click', () => { s.portraitLlmPrompt = DEFAULT_PORTRAIT_LLM_PROMPT; root.find('#npcb_portraitllm').val(s.portraitLlmPrompt); save(); });
     root.find('#npcb_speakerportraits, #npcb_speakersize, #npcb_enabled').on('input change', () => { applyCardStyle(); decorateAll(); });
-    bind('#npcb_colorrule', 'colorRule');
     bind('#npcb_speakerrule', 'speakerRule');
     root.find('#npcb_reset_speaker').on('click', () => { s.speakerRule = DEFAULT_SPEAKER_RULE; root.find('#npcb_speakerrule').val(s.speakerRule); save(); });
-    root.find('#npcb_reset_color').on('click', () => { s.colorRule = DEFAULT_COLOR_RULE; root.find('#npcb_colorrule').val(s.colorRule); save(); });
     bind('#npcb_trackoutfits', 'trackOutfits', 'checkbox');
     bind('#npcb_exposure', 'describeExposure', 'checkbox');
     bind('#npcb_incwardrobe', 'includeWardrobe', 'checkbox');
@@ -2254,7 +2164,7 @@ jQuery(async () => {
         }),
         /** Who was in the scene at a chat message (for the last message: before + after it): [{ id, name, template }]. */
         getRosterAt: (idx) => (hasChat() ? rosterAtMessage(Number(idx)) : []).map(id => ({ id, name: lib()[id]?.name ?? id, template: lib()[id] || null })),
-        /** Resolve an id or name (as written by the LLM in data-npc) to a library id, or null. */
+        /** Resolve an id or name (as written by the LLM in <npc id="…">) to a library id, or null. */
         resolveNpc: (ref) => resolveRef(ref, lib()),
         openPersonaCharacter,
         saveSettings: save,

@@ -11,8 +11,11 @@ To prevent LLM Hallucination drift (User is standing, hair swaying in the wind, 
 - Separate dressed-states to give the LLm headsup about what is currently the state (naked, has underwear on, etc).
 - Full configuration of the Enum states, don't like a state? Change it.
 - Profile generation if a character doesn't have one already.
-- Vibe coded because I hate making extensions.
+- Speaker Cards with (optional) portrait' and their own dialogue color.
+- Set starting cast in greetings (with per-greeting overrides).
 
+- Vibe coded because I hate making extensions.
+![Character Dialogue Card](image3.png)
 ![NPC Book creation](image1.png)
 ![During chat pop-up and NPC listing](image2.png)
 
@@ -49,7 +52,7 @@ Using Text Completion? There is no Prompt Manager there, so set **Mode** to *Aut
 {
   "characters": [
     {"id": "seraphina"},
-    {"id": "suzie", "posture": "sitting", "clothing": {"bottom-outer": "jeans"}},
+    {"id": "suzie", "posture": "sitting", "feet": "black-socks"},
     {"id": "user", "posture": "lying down"}
   ]
 }
@@ -66,7 +69,7 @@ Each character starts from their card. Any field you add overrides the card for 
 
 Item names are matched loosely, so `"jeans"` finds "Blue Jeans". An item that isn't in the wardrobe is added to it. Use `"id": "user"` to set your own starting posture and clothing.
 
-**Speaker cards.** The AI wraps each character's part of a reply in an `<npc>` block. Each block shows as a card with that character's portrait on the left and their lines in their dialogue color. Greetings can use the same blocks, so a card's opening message looks like the rest of the chat:
+**Speaker cards.** The AI wraps each character's part of a reply in an <npc> block, and each block shows as a card with their portrait on the left and their dialogue in their color (switch off under Portraits for plain text). Greetings can use the same blocks, so a card's opening message looks like the rest of the chat:
 
 ```html
 The glade is quiet; morning light filters through the canopy.
@@ -77,7 +80,7 @@ She kneels by the bed and checks the bandages.</npc>
 <npc id="suzie">*Suzie peeks around the doorframe.* "Is he okay?"</npc>
 ```
 
-Use the character's NPC Library ID. Text outside a block is shown as normal narration. Start a new block whenever the focus moves to another character, and don't nest blocks. To change a character's portrait, click it on their NPC card: you can upload an image, pick one from the SillyTavern server, crop it, or generate one with the Image Generation extension. The card size is set under **Settings** → **Portraits**.
+Use the character's NPC Library ID. Text outside a block is shown as normal narration. Start a new block whenever the focus moves to another character, and don't nest blocks. To change a character's portrait, click it on their NPC card: you can upload an image, pick one from the SillyTavern server, crop it, or generate one with the Image Generation extension. The portrait size is set under Extensions → NPC Book → Portraits. Characters without a portrait show their initials.
 
 **Swipes.** Swiping or deleting a message rolls the scene back to that point.
 
