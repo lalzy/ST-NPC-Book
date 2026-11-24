@@ -23,12 +23,21 @@ const VIEW_STYLE = `
 .npcb-relview-seg{display:flex;border:1px solid var(--SmartThemeBorderColor,#3a3d46);border-radius:6px;overflow:hidden}
 .npcb-relview-seg .menu_button{border:0;border-radius:0;opacity:.65}
 .npcb-relview-seg .menu_button.on{opacity:1;font-weight:600;background:var(--black30a,rgba(0,0,0,.3))}
-.npcb-web{position:relative;width:100%;aspect-ratio:860/520;min-height:320px}
+.npcb-web{position:relative;width:100%;aspect-ratio:860/520;min-height:320px;overflow:hidden;touch-action:none;cursor:grab;border:1px solid var(--SmartThemeBorderColor,#3a3d46);border-radius:8px;user-select:none}
+.npcb-web.dragging{cursor:grabbing}
+.npcb-web-stage{position:absolute;inset:0;transform-origin:0 0}
+.npcb-web-zoom{position:absolute;right:8px;bottom:8px;display:flex;gap:4px;z-index:2}
+.npcb-web-zoom .menu_button{width:auto;margin:0;padding:4px 8px}
 .npcb-web svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
 .npcb-web-node{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;max-width:130px;text-align:center}
-.npcb-web-node .npcb-web-ava{border-radius:50%;padding:2px;border:2px solid var(--npcb-c,#8a8f9c)}
+.npcb-web-node .npcb-web-ava{border-radius:50%;padding:2px;border:2px solid var(--npcb-c,#8a8f9c);display:flex}
+/* Portraits are square: cut them to the circle inside the ring (clip-path too, so a theme's avatar radius cannot undo it). */
+.npcb-web-node .npcb-web-ava .npcb-ava{display:block;width:48px;height:48px;border-radius:50% !important;clip-path:circle(50%);object-fit:cover;overflow:hidden}
+/* No portrait: the initials fill the circle instead of shrinking. */
+.npcb-web-node .npcb-web-ava .npcb-ava-fallback{display:flex;align-items:center;justify-content:center;line-height:1;font-size:19px;font-weight:700}
 .npcb-web-node.inscene .npcb-web-ava{box-shadow:0 0 0 3px #90be6d}
-.npcb-web-node.root .npcb-ava{width:64px;height:64px}
+.npcb-web-node.root .npcb-web-ava .npcb-ava{width:64px;height:64px}
+.npcb-web-node.root .npcb-web-ava .npcb-ava-fallback{font-size:26px}
 .npcb-web-node.second{opacity:.8}
 .npcb-web-node b{font-size:.85em;line-height:1.1}
 .npcb-web-node small{opacity:.7;font-size:.72em}
@@ -85,6 +94,25 @@ export async function openRelationshipView({ root, rootRels, mode = 'chat' }) {
     const s = settings();
     const src = makeSource(mode, root, rootRels);
     const st = { center: root, history: [], layout: s.relViewLayout === 'tree' ? 'tree' : 'web', depth: Number(s.relViewDepth) === 1 ? 1 : 2 };
+    // Web pan / zoom: the stage is moved by (x, y) px and scaled by k; `moved` tells a drag from a click.
+    const view = { x: 0, y: 0, k: 1, moved: 0 };
+    const MIN_K = 0.4, MAX_K = 3;
+    const stageTransform = () => `transform:translate(${view.x}px, ${view.y}px) scale(${view.k})`;
+    const applyView = () => box.find('.npcb-web-stage').attr('style', stageTransform());
+    const resetView = () => { view.x = 0; view.y = 0; view.k = 1; };
+    /** Zoom by `factor` keeping the point under (clientX, clientY) where it is. */
+    const zoomAt = (clientX, clientY, factor) => {
+        const web = box.find('.npcb-web')[0];
+        if (!web) return;
+        const rect = web.getBoundingClientRect();
+        const px = clientX - rect.left, py = clientY - rect.top;
+        const k = Math.min(MAX_K, Math.max(MIN_K, view.k * factor));
+        const f = k / view.k;
+        view.x = px - (px - view.x) * f;
+        view.y = py - (py - view.y) * f;
+        view.k = k;
+        applyView();
+    };
     const box = $('<div class="npcb-relview"></div>');
     const attitudes = () => settings().attitudes || [];
     const color = (att) => attitudeColor(att, attitudes());
@@ -110,7 +138,8 @@ export async function openRelationshipView({ root, rootRels, mode = 'chat' }) {
             return `<div class="npcb-web-node ${cls}" data-id="${esc(n.id)}" style="${pct(n)};--npcb-c:${esc(p.card?.color || '#8a8f9c')}" title="${esc(p.name)}">
                 <div class="npcb-web-ava">${avatarHtml(p.card, p.name, n.level === 0 ? 'npcb-ava-md' : 'npcb-ava-sm')}</div><b>${esc(p.name)}</b>${p.sub ? `<small>${esc(p.sub)}</small>` : ''}</div>`;
         }).join('');
-        return `<div class="npcb-web"><svg viewBox="0 0 ${L.w} ${L.h}" preserveAspectRatio="none" aria-hidden="true">${lines}</svg>${labels}${nodes}</div>`;
+        return `<div class="npcb-web"><div class="npcb-web-stage" style="${stageTransform()}"><svg viewBox="0 0 ${L.w} ${L.h}" preserveAspectRatio="none" aria-hidden="true">${lines}</svg>${labels}${nodes}</div>
+            <div class="npcb-web-zoom"><div class="menu_button" data-zoom="in" title="Zoom in" aria-label="Zoom in"><i class="fa-solid fa-plus"></i></div><div class="menu_button" data-zoom="out" title="Zoom out" aria-label="Zoom out"><i class="fa-solid fa-minus"></i></div><div class="menu_button" data-zoom="reset" title="Reset view" aria-label="Reset view"><i class="fa-solid fa-expand"></i></div></div></div>`;
     };
 
     const treeHtml = (g) => {
@@ -147,19 +176,71 @@ export async function openRelationshipView({ root, rootRels, mode = 'chat' }) {
             </div>
             ${g.edges.length ? (st.layout === 'web' ? webHtml(g) : treeHtml(g)) : '<div class="npcb-empty">No relationships yet.</div>'}
             <div class="npcb-relview-legend"><span>Attitude:</span>${attitudes().map(a => `<span><span class="npcb-dot" style="background:${color(a)}"></span> ${esc(a)}</span>`).join('')}
-                <span style="flex:1"></span><span>${st.layout === 'web' ? 'Solid: own · dashed: their links · green ring: in scene · ' : ''}Click someone to centre on them</span></div>`);
+                <span style="flex:1"></span><span>${st.layout === 'web' ? 'Solid: own · dashed: their links · green ring: in scene · Drag to move, scroll or pinch to zoom · ' : ''}Click someone to centre on them</span></div>`);
     };
 
     let afterClose = null;
     const popup = new c.Popup(box, c.POPUP_TYPE.TEXT, '', { wide: true, large: true, allowVerticalScrolling: true, okButton: 'Close' });
     box.on('click', '[data-act="depth"]', (e) => { st.depth = Number($(e.currentTarget).data('v')); s.relViewDepth = st.depth; save(); draw(); });
     box.on('click', '[data-act="layout"]', (e) => { st.layout = String($(e.currentTarget).data('v')); s.relViewLayout = st.layout; save(); draw(); });
-    box.on('click', '[data-act="back"]', () => { st.center = st.history.pop() ?? root; draw(); });
+    box.on('click', '[data-act="back"]', () => { st.center = st.history.pop() ?? root; resetView(); draw(); });
+    // Drag to pan (mouse, pen or one finger), pinch with two fingers or scroll to zoom.
+    const pointers = new Map();
+    let pinch = null; // { dist, mid } of the last two-finger frame
+    const two = () => { const [a, b] = [...pointers.values()]; return { dist: Math.hypot(a.x - b.x, a.y - b.y), mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } }; };
+    box.on('pointerdown', '.npcb-web', (e) => {
+        const ev = e.originalEvent;
+        if ($(ev.target).closest('.npcb-web-zoom').length || (ev.pointerType === 'mouse' && ev.button !== 0)) return;
+        pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+        if (pointers.size === 1) view.moved = 0;
+        if (pointers.size === 2) pinch = two();
+    });
+    box.on('pointermove', '.npcb-web', (e) => {
+        const ev = e.originalEvent;
+        const prev = pointers.get(ev.pointerId);
+        if (!prev) return;
+        pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+        if (pointers.size === 1) {
+            const dx = ev.clientX - prev.x, dy = ev.clientY - prev.y;
+            view.moved += Math.abs(dx) + Math.abs(dy);
+            if (view.moved < 4) return; // still a click
+            // Capture only once it is a drag, so a plain click still reaches the person under it.
+            if (!e.currentTarget.hasPointerCapture?.(ev.pointerId)) { e.currentTarget.setPointerCapture?.(ev.pointerId); $(e.currentTarget).addClass('dragging'); }
+            view.x += dx;
+            view.y += dy;
+            applyView();
+        } else if (pointers.size === 2 && pinch) {
+            const now = two();
+            view.moved += 10;
+            view.x += now.mid.x - pinch.mid.x;
+            view.y += now.mid.y - pinch.mid.y;
+            zoomAt(now.mid.x, now.mid.y, pinch.dist ? now.dist / pinch.dist : 1);
+            pinch = now;
+        }
+    });
+    box.on('pointerup pointercancel', '.npcb-web', (e) => {
+        pointers.delete(e.originalEvent.pointerId);
+        if (pointers.size < 2) pinch = null;
+        if (!pointers.size) $(e.currentTarget).removeClass('dragging');
+    });
+    box.on('wheel', '.npcb-web', (e) => {
+        const ev = e.originalEvent;
+        ev.preventDefault();
+        zoomAt(ev.clientX, ev.clientY, Math.exp(-ev.deltaY * (ev.deltaMode === 1 ? 0.05 : 0.0015)));
+    });
+    box.on('click', '[data-zoom]', (e) => {
+        const z = $(e.currentTarget).data('zoom');
+        if (z === 'reset') { resetView(); applyView(); return; }
+        const r = box.find('.npcb-web')[0]?.getBoundingClientRect();
+        if (r) zoomAt(r.left + r.width / 2, r.top + r.height / 2, z === 'in' ? 1.25 : 0.8);
+    });
     box.on('click', '.npcb-web-node, .npcb-tree-row', (e) => {
+        if ($(e.currentTarget).is('.npcb-web-node') && view.moved >= 4) { view.moved = 0; return; } // the end of a drag, not a click
         const id = String($(e.currentTarget).data('id'));
         if (!id || id === st.center || id === USER_REF) return; // you have no relationship list of your own
         st.history.push(st.center);
         st.center = id;
+        resetView();
         draw();
     });
     box.on('click', '[data-act="open"]', () => {
