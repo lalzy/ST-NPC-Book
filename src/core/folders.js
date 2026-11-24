@@ -1,5 +1,6 @@
 // NPC library folder model: path normalisation, listing, rename and dissolve.
 
+import { meta } from './context.js';
 import { lib, settings } from './settings.js';
 
 /** "  Eldoria / Village/ " → "Eldoria/Village" ('' = no folder). */
@@ -8,6 +9,17 @@ export function normFolder(path) {
 }
 export const folderParent = (path) => path.split('/').slice(0, -1).join('/');
 export const inFolder = (folder, path) => folder === path || folder.startsWith(`${path}/`);
+
+/** This chat's folder for new NPCs, if one was picked in the scene bar (undefined = use the setting). */
+export function chatNewNpcFolder() {
+    const m = meta();
+    return m && typeof m.newNpcFolder === 'string' ? m.newNpcFolder : undefined;
+}
+
+/** Where new NPCs the LLM creates go: this chat's folder if set, else the "Folder for new NPCs" setting. */
+export function newNpcFolder() {
+    return normFolder(chatNewNpcFolder() ?? settings().autoFolder);
+}
 
 /** Every folder that exists: saved ones, ones NPCs are in, and all their parents. */
 export function allFolders() {

@@ -2,7 +2,7 @@
 
 import { MODULE } from '../constants.js';
 import { ctx, excludedNames } from '../core/context.js';
-import { normFolder, registerFolder } from '../core/folders.js';
+import { newNpcFolder, registerFolder } from '../core/folders.js';
 import { pickColor } from '../core/npcs.js';
 import { extensions, runtime } from '../core/runtime.js';
 import { lib, save, settings } from '../core/settings.js';
@@ -139,7 +139,7 @@ export async function processLastMessage() {
                     // A new NPC's template is finished here, before its instance is copied from it.
                     prepareNew: (t, entry) => {
                         t.color = t.color || pickColor();
-                        t.folder = normFolder(s.autoFolder);
+                        t.folder = newNpcFolder();
                         registerFolder(t.folder);
                         for (const ext of extensions.values()) {
                             if (typeof ext.fromTracker !== 'function' || !entry) continue;
