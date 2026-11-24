@@ -4,10 +4,13 @@ import { extensions } from '../../core/runtime.js';
 import { lib, settings } from '../../core/settings.js';
 import { clone, esc } from '../../core/utils.js';
 import { cloneScene } from '../../logic/instances.js';
+import { mirrorRelationship } from '../../logic/relationships.js';
 import { currentScene, removeFromScene, writeCurrentScene } from '../../scene/roster.js';
 import { avatarHtml } from '../avatar.js';
 import { openLibrary } from '../library/modal.js';
 import { closePopovers, placePopover } from '../popover.js';
+import { chatPeople, whoInChat } from '../relationships/people.js';
+import { cleanRelationships, mountRelationships } from '../relationships/relationshipEditor.js';
 import { bindTabs } from '../tabs.js';
 import { mountPaperdoll } from '../wardrobe/paperdoll.js';
 import { mountWardrobe } from '../wardrobe/wardrobeEditor.js';
@@ -30,7 +33,7 @@ export function openInstanceEditor(id, anchor) {
         <div class="npcb-inst-head">${avatarHtml(t, name, 'npcb-ava-md')}
             <div><b>${esc(name)}</b><br><small class="npcb-dim">${esc(id)}</small></div>
         </div>
-        <div class="npcb-tabs"><div class="npcb-tab active" data-tab="state">State</div><div class="npcb-tab" data-tab="outfit">Outfit</div><div class="npcb-tab" data-tab="wardrobe">Wardrobe (${(inst.wardrobe || []).length})</div></div>
+        <div class="npcb-tabs"><div class="npcb-tab active" data-tab="state">State</div><div class="npcb-tab" data-tab="outfit">Outfit</div><div class="npcb-tab" data-tab="wardrobe">Wardrobe (${(inst.wardrobe || []).length})</div>${s.trackRelationships ? `<div class="npcb-tab" data-tab="relations">Relations (${(inst.relationships || []).length})</div>` : ''}</div>
         <div class="npcb-tabpane" data-pane="state">
         <label>Current posture<select class="text_pole npcb-i-posture">${opts(s.postures, inst.posture)}</select></label>
         <label>Current state<select class="text_pole npcb-i-state">${opts(s.states, inst.state)}</select></label>
@@ -40,6 +43,10 @@ export function openInstanceEditor(id, anchor) {
         <div class="npcb-tabpane" data-pane="wardrobe" style="display:none">
             <small class="npcb-dim">This chat's own wardrobe for ${esc(name)}. Changes stay in this chat; the Library card is not touched.</small>
             <div class="npcb-wd-host"></div>
+        </div>
+        <div class="npcb-tabpane" data-pane="relations" style="display:none">
+            <small class="npcb-dim">This chat's copy. The Library card is not touched.</small>
+            <div class="npcb-rel-host"></div>
         </div>
         <div class="npcb-row">
             <div class="menu_button npcb-i-save"><i class="fa-solid fa-check"></i> Save</div>
@@ -51,6 +58,15 @@ export function openInstanceEditor(id, anchor) {
     pop.on('click', e => e.stopPropagation());
     let draftOutfit = clone(inst.outfit || []);
     const draftWardrobe = clone({ wardrobe: inst.wardrobe || [] });
+    const draftRelations = clone(inst.relationships || []);
+    const scene0 = currentScene();
+    mountRelationships(pop.find('.npcb-rel-host'), draftRelations, {
+        self: id,
+        chat: true,
+        who: (to) => whoInChat(scene0, to),
+        people: () => chatPeople(scene0, id),
+        onChange: (l) => pop.find('.npcb-tab[data-tab="relations"]').text(`Relations (${l.length})`),
+    });
     const showTab = (tab) => pop.find(`.npcb-tab[data-tab="${tab}"]`).trigger('click');
     const mountDoll = () => mountPaperdoll(pop.find('.npcb-doll-host'), () => draftOutfit, (o) => { draftOutfit = o; }, () => draftWardrobe.wardrobe, () => showTab('wardrobe'));
     bindTabs(pop);
@@ -64,7 +80,8 @@ export function openInstanceEditor(id, anchor) {
         const tab = $(e.currentTarget).data('tab');
         if (tab === 'outfit') { draftOutfit = draftOutfit.filter(w => draftWardrobe.wardrobe.some(i => i.id === w.id)); mountDoll(); }
         // The wardrobe editor needs room: widen the popover while that tab is open.
-        pop.toggleClass('npcb-inst-wide', tab === 'wardrobe').css('width', tab === 'wardrobe' ? 'min(760px, 96vw)' : '');
+        const wide = tab === 'wardrobe' || tab === 'relations';
+        pop.toggleClass('npcb-inst-wide', wide).css('width', wide ? 'min(760px, 96vw)' : '');
         placePopover(pop, anchor);
     });
     pop.on('click', '.npcb-i-save', () => {
@@ -77,6 +94,11 @@ export function openInstanceEditor(id, anchor) {
             target.posture = String(pop.find('.npcb-i-posture').val() ?? '');
             target.state = String(pop.find('.npcb-i-state').val() ?? '');
             target.feelings = String(pop.find('.npcb-i-feelings').val() ?? '').trim();
+            target.relationships = cleanRelationships(draftRelations);
+            // "Both directions": the other NPC's copy in this chat gets the relationship back (only if it has none yet).
+            for (const r of draftRelations.filter(x => x.mirror && scene.instances[x.to])) {
+                scene.instances[r.to].relationships = mirrorRelationship(scene.instances[r.to].relationships, id, r).list;
+            }
             writeCurrentScene(scene);
         }
         closePopovers();

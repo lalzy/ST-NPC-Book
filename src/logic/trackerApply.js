@@ -5,6 +5,7 @@ import { attachInstance, cloneScene, unusedTemplates } from './instances.js';
 import { resolveEntry } from './matching.js';
 import { applyOutfitChange, buildWardrobe, newClothingIn, normOutfitChange } from './outfit.js';
 import { PROFILE_TRAIT_KEYS, profileFromEntry } from './profile.js';
+import { applyRelationshipChanges, normalizeRelationshipChanges, resolveRelationshipTarget } from './relationships.js';
 import { cleanId, normalize, pickEnum, uniqueId } from './text.js';
 
 function titleFromId(id) { return String(id).replace(/[_-]+/g, ' ').replace(/\b[a-z]/g, c => c.toUpperCase()).trim(); }
@@ -27,7 +28,7 @@ function isLeaving(entry) {
  * prepareNew(template, entry) may decorate a newly created template before its instance is copied from it.
  * Returns { scene, created: [template], createdEntries, skipped, log }.
  */
-export function applyTracker(list, prevScene, { library, threshold, numericTolerance, postures, states, conditions = ['Worn'], allowWardrobeGrowth = false, autoCreate = true, traitKeys = [], excludeNames = [], maxNew = 0, prepareNew = null }) {
+export function applyTracker(list, prevScene, { library, threshold, numericTolerance, postures, states, conditions = ['Worn'], allowWardrobeGrowth = false, trackRelationships = false, attitudes = [], relationshipTypes = [], userName = '', autoCreate = true, traitKeys = [], excludeNames = [], maxNew = 0, prepareNew = null }) {
     const scene = cloneScene(prevScene);
     const lib = { ...(library || {}) };
     const opts = { postures, states, conditions };
@@ -114,6 +115,15 @@ export function applyTracker(list, prevScene, { library, threshold, numericToler
         inst.state = pickEnum(entry.state, states, inst.state);
         const feelings = entry.feelings ?? entry.thoughts;
         if (feelings !== undefined && feelings !== null && String(feelings).trim()) inst.feelings = String(feelings).trim();
+        // Relationship changes land on this chat's instance. Targets: "user", the chat's NPCs, then library NPCs.
+        if (trackRelationships && entry.relationships) {
+            const people = { ...lib, ...scene.instances };
+            const rc = applyRelationshipChanges(inst.relationships, normalizeRelationshipChanges(entry.relationships), {
+                attitudes, types: relationshipTypes, self: id, resolve: (ref) => resolveRelationshipTarget(ref, people, userName),
+            });
+            if (rc.changed.length) { inst.relationships = rc.list; log.push({ name: inst.name, action: 'relationships', id, items: rc.changed }); }
+            if (rc.rejected.length) log.push({ name: inst.name, action: 'relationship-rejected', id, items: rc.rejected });
+        }
     }
     return { scene, created, createdEntries, skipped, log };
 }

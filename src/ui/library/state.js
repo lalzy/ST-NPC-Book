@@ -10,4 +10,5 @@ export const libState = {
     newFolder: '',
     draftExt: {},
     draftDialogue: [],
+    draftRelationships: [],
 };

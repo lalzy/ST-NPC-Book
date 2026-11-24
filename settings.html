@@ -112,6 +112,21 @@
             </div>
         </div>
 
+        <!-- Relationships -->
+        <div class="inline-drawer npcb-sec">
+            <div class="inline-drawer-toggle inline-drawer-header"><span class="npcb-sec-title"><i class="fa-solid fa-people-arrows fa-fw"></i> Relationships</span><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>
+            <div class="inline-drawer-content">
+                <label class="checkbox_label"><input type="checkbox" id="npcb_relationships"> Track relationships <i class="fa-solid fa-circle-info npcb-help" title="Adds a Relationships tab to NPC cards and the in-chat card. Each NPC in the scene sends its relationships with you and with the others present, and the LLM reports changes. Costs context: off by default."></i></label>
+                <div class="npcb-row npcb-lists">
+                    <label>Types <i class="fa-solid fa-circle-info npcb-help" title="The only relationship types allowed, one per line. The LLM must use one of these exact words; anything else is ignored, so wording cannot drift (Friend → Good friends → became friends with…)."></i><textarea id="npcb_reltypes" class="text_pole textarea_compact" rows="8"></textarea></label>
+                    <label>Attitudes <i class="fa-solid fa-circle-info npcb-help" title="How an NPC feels about someone, one per line, worst to best. Enforced the same way as types."></i><textarea id="npcb_attitudes" class="text_pole textarea_compact" rows="8"></textarea></label>
+                </div>
+                <div class="npcb-prompts">
+                    <div class="menu_button npcb-prompt-btn" data-prompt="relationshipRule"><i class="fa-solid fa-pen-to-square"></i> Relationship rule</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Speaker cards -->
         <div class="inline-drawer npcb-sec">
             <div class="inline-drawer-toggle inline-drawer-header"><span class="npcb-sec-title"><i class="fa-solid fa-comments fa-fw"></i> Speaker cards</span><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>

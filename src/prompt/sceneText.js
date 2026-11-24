@@ -8,9 +8,10 @@ import { settings } from '../core/settings.js';
 import { indent, xa, xt } from '../core/utils.js';
 import { exposureSummary, findItem } from '../logic/outfit.js';
 import { PROFILE_FIELDS } from '../logic/profile.js';
+import { USER_REF } from '../logic/relationships.js';
 import { normalize } from '../logic/text.js';
 import { personaData, personaDescription, promptUser } from '../scene/persona.js';
-import { promptRoster } from '../scene/roster.js';
+import { promptRoster, promptScene } from '../scene/roster.js';
 
 function wearingText(outfit, wardrobe) {
     const s = settings();
@@ -91,6 +92,23 @@ function dialogueExamplesFor(t, inst) {
     return out;
 }
 
+/**
+ * An NPC's relationships for the prompt (when tracking them is on): only those with you and with characters
+ * in the scene right now, to keep the context small. Names come from the chat's own NPCs.
+ */
+function relationshipsXml(inst) {
+    const s = settings();
+    if (!s.trackRelationships) return [];
+    const scene = promptScene();
+    const rels = (inst.relationships || []).filter(r => r?.to && (r.to === USER_REF || scene.active.includes(r.to)));
+    if (!rels.length) return [];
+    const nameOf = (to) => (to === USER_REF ? ctx().name1 : scene.instances[to]?.name ?? to);
+    return [['<relationships>', ...rels.map(r => {
+        const attrs = ` to="${xa(r.to)}" name="${xa(nameOf(r.to))}"${r.type ? ` type="${xa(r.type)}"` : ''}${r.attitude ? ` attitude="${xa(r.attitude)}"` : ''}`;
+        return indent(r.note ? `<rel${attrs}>${xt(r.note)}</rel>` : `<rel${attrs}/>`, 2);
+    }), '</relationships>'].join('\n')];
+}
+
 /** One NPC's <char> block, built from the chat's instance only (it carries its own card fields, wardrobe and ext data). */
 function buildCharBlock(inst) {
     const s = settings();
@@ -105,6 +123,7 @@ function buildCharBlock(inst) {
     if (details) inner.push(`<details>${xt(details)}</details>`);
     const examples = dialogueExamplesFor(t, inst);
     if (examples.length) inner.push(['<dialogue_examples>', ...examples.map(e => indent(`<example${e.when ? ` when="${xa(e.when)}"` : ''}>${xt(e.text)}</example>`, 2)), '</dialogue_examples>'].join('\n'));
+    inner.push(...relationshipsXml(inst));
     const stAttrs = [
         inst.posture && `posture="${xa(inst.posture)}"`,
         inst.state && `mood="${xa(inst.state)}"`,

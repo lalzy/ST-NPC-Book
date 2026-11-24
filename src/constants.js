@@ -77,6 +77,19 @@ export const DEFAULT_OUTFIT_RULES = `Clothing:
 - "condition" is one of: [[CONDITIONS]]
 - A new character also gets "wardrobe": 4-8 fitting items as [{"name": "...", "slots": ["..."]}], and "outfit": {"wear": ["item name", ...]} for what they wear now. Slots: [[SLOTS]]`;
 
+export const DEFAULT_RELATIONSHIP_RULE = `Relationships:
+- When your reply changes how a character feels about someone ([[USER]] or another character), or they form a new bond, add "relationships" to that character's entry with only what changed, e.g. {"id": "...", "relationships": {"user": {"type": "Friend", "attitude": "Friendly", "note": "Saved her from the bandit."}}}.
+- Use "user" for [[USER]] and the id for anyone else. Give "type" only for a new or changed bond; "note" is one short line.
+- "type" is one of: [[REL_TYPES]]
+- "attitude" is one of: [[ATTITUDES]]
+- Use these exact words. Anything else is ignored.`;
+
+/** The first relationship rule (free-text types): saved settings that still hold it exactly are moved to the new default. */
+export const DEFAULT_RELATIONSHIP_RULE_V1 = `Relationships:
+- When your reply changes how a character feels about someone ([[USER]] or another character), or they form a new bond, add "relationships" to that character's entry with only what changed, e.g. {"id": "...", "relationships": {"user": {"attitude": "Friendly", "note": "Saved her from the bandit."}}}.
+- Use "user" for [[USER]] and the id for anyone else. Give "type" (friend, sister, rival, employer...) only for a new or changed bond; "note" is one short line.
+- "attitude" is one of: [[ATTITUDES]]`;
+
 export const DEFAULT_SPEAKER_RULE = `Speaker blocks (mandatory in every reply):
 - Everything a character does or says goes inside <npc id="ID">...</npc>: their actions, the narration about them, and all of their dialogue. Use their exact id from the scene.
 - Open a new block every time the focus moves to another character. Only narration that belongs to no character (setting, weather, time passing) may stand outside a block. Never nest blocks.
@@ -206,6 +219,10 @@ export const DEFAULTS = {
     speakerRule: DEFAULT_SPEAKER_RULE,
     speakerReminder: DEFAULT_SPEAKER_REMINDER,
     trackOutfits: true,
+    trackRelationships: false, // optional: relationships cost context, so they are opt-in
+    attitudes: ['Hostile', 'Distrustful', 'Wary', 'Neutral', 'Friendly', 'Warm', 'Close', 'Devoted'],
+    relationshipTypes: ['Stranger', 'Acquaintance', 'Friend', 'Close friend', 'Lover', 'Spouse', 'Family', 'Sibling', 'Parent', 'Child', 'Mentor', 'Student', 'Employer', 'Employee', 'Colleague', 'Rival', 'Enemy'],
+    relationshipRule: DEFAULT_RELATIONSHIP_RULE,
     includeWardrobe: true,
     allowWardrobeGrowth: true,
     wardrobeDollCollapsed: false,

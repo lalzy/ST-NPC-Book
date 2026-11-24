@@ -9,12 +9,15 @@ import { lib, save, settings } from '../../core/settings.js';
 import { clone, esc } from '../../core/utils.js';
 import { cropImageUrl, readFileAsDataUrl, uploadPortrait } from '../../images/imageTools.js';
 import { defaultPronouns } from '../../logic/profile.js';
+import { mirrorRelationship } from '../../logic/relationships.js';
 import { ID_PATTERN, uniqueId } from '../../logic/text.js';
 import { ensurePortrait } from '../../portraits/portraitQueue.js';
 import { addToScene, currentRoster, removeFromScene } from '../../scene/roster.js';
 import { renderAssist } from '../assist/assistPanel.js';
 import { resetAssistFor } from '../assist/assistState.js';
 import { avatarHtml } from '../avatar.js';
+import { libraryPeople, whoInLibrary } from '../relationships/people.js';
+import { cleanRelationships, mountRelationships } from '../relationships/relationshipEditor.js';
 import { renderRoster } from '../roster/rosterBar.js';
 import { bindTabs } from '../tabs.js';
 import { mountWardrobe } from '../wardrobe/wardrobeEditor.js';
@@ -42,9 +45,10 @@ export function selectTemplate(id, isNew = false, tab = 'card') {
     libState.draftWardrobe = clone({ wardrobe: t.wardrobe || [], defaultWorn: t.defaultWorn || [] });
     libState.draftExt = clone(t.ext || {});
     libState.draftDialogue = clone(t.dialogue || []);
+    libState.draftRelationships = clone(t.relationships || []);
     const extTabs = [...extensions.values()].filter(x => x.cardTab);
     ed.html(`
-      <div class="npcb-tabs"><div class="npcb-tab ${tab === 'card' ? 'active' : ''}" data-tab="card">Card</div><div class="npcb-tab ${tab === 'wardrobe' ? 'active' : ''}" data-tab="wardrobe">Wardrobe (${(t.wardrobe || []).length})</div>${extTabs.map(x => `<div class="npcb-tab ${tab === `ext:${x.id}` ? 'active' : ''}" data-tab="ext:${esc(x.id)}">${esc(x.cardTab.label || x.id)}</div>`).join('')}</div>
+      <div class="npcb-tabs"><div class="npcb-tab ${tab === 'card' ? 'active' : ''}" data-tab="card">Card</div><div class="npcb-tab ${tab === 'wardrobe' ? 'active' : ''}" data-tab="wardrobe">Wardrobe (${(t.wardrobe || []).length})</div>${s.trackRelationships ? `<div class="npcb-tab ${tab === 'relationships' ? 'active' : ''}" data-tab="relationships">Relationships (${(t.relationships || []).length})</div>` : ''}${extTabs.map(x => `<div class="npcb-tab ${tab === `ext:${x.id}` ? 'active' : ''}" data-tab="ext:${esc(x.id)}">${esc(x.cardTab.label || x.id)}</div>`).join('')}</div>
       <div class="npcb-tabpane" data-pane="card" ${tab === 'card' ? '' : 'style="display:none"'}>
       <div class="npcb-ed-top">
         <div class="npcb-ed-portrait" title="Click to set portrait">${avatarHtml(t, t.name || '?', 'npcb-ava-lg')}</div>
@@ -92,6 +96,10 @@ export function selectTemplate(id, isNew = false, tab = 'card') {
       <div class="npcb-tabpane" data-pane="wardrobe" ${tab === 'wardrobe' ? '' : 'style="display:none"'}>
         <div class="npcb-wd-host"></div>
       </div>
+      <div class="npcb-tabpane" data-pane="relationships" ${tab === 'relationships' ? '' : 'style="display:none"'}>
+        <small class="npcb-dim">Starting relationships. Each new chat copies them; the chat's copy changes from there.</small>
+        <div class="npcb-rel-host"></div>
+      </div>
       ${extTabs.map(x => `<div class="npcb-tabpane" data-pane="ext:${esc(x.id)}" ${tab === `ext:${x.id}` ? '' : 'style="display:none"'}><div class="npcb-ext-host" data-ext="${esc(x.id)}"></div></div>`).join('')}
       <div class="npcb-row npcb-ed-actions">
         <div class="menu_button npcb-ed-save"><i class="fa-solid fa-floppy-disk"></i> Save</div>
@@ -108,6 +116,12 @@ export function selectTemplate(id, isNew = false, tab = 'card') {
     mountDialogueExamples(ed.find('.npcb-dx-host'), libState.draftDialogue);
     ed.on('click.npcb', '.npcb-tab', () => renderAssist());
     ed.on('click.npcb', '.npcb-ed-export', () => exportNpcs([lib()[t.id]].filter(Boolean), `${t.id}.npcbook.json`));
+    mountRelationships(ed.find('.npcb-rel-host'), libState.draftRelationships, {
+        self: t.id,
+        who: whoInLibrary,
+        people: () => libraryPeople(t.id),
+        onChange: (l) => ed.find('.npcb-tab[data-tab="relationships"]').text(`Relationships (${l.length})`),
+    });
     libState.wardrobeUi = mountWardrobe(ed.find('.npcb-wd-host'), libState.draftWardrobe, {
         key: isNew ? '' : t.id,
         onChange: (d) => ed.find('.npcb-tab[data-tab="wardrobe"]').text(`Wardrobe (${d.wardrobe.length})`),
@@ -240,12 +254,17 @@ async function saveTemplateFromEditor(t, isNew) {
         wardrobe: (libState.draftWardrobe?.wardrobe ?? t.wardrobe ?? []).filter(i => i.name.trim()),
         dialogue: libState.draftDialogue.filter(d => String(d.text ?? '').trim()).map(d => ({ kind: d.kind || 'always', value: String(d.value ?? '').trim(), text: String(d.text).trim() })),
         ext: clone(libState.draftExt || t.ext || {}),
+        relationships: cleanRelationships(libState.draftRelationships),
         defaultWorn: (libState.draftWardrobe?.defaultWorn ?? t.defaultWorn ?? []),
         auto: isNew ? false : !!t.auto,
         created: t.created || Date.now(),
         updated: Date.now(),
     };
     registerFolder(lib()[id].folder);
+    // "Both directions": give the other card the relationship back (only if it has none towards this NPC yet).
+    for (const r of libState.draftRelationships.filter(x => x.mirror && x.to !== id && lib()[x.to])) {
+        lib()[r.to].relationships = mirrorRelationship(lib()[r.to].relationships, id, r).list;
+    }
     save();
     toastr.success(`Saved ${name}.`, 'NPC Book');
     // Templates are blueprints: chats that already have an instance of this NPC keep their own copy.

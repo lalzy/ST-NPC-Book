@@ -8,6 +8,7 @@
 // Scene shape: { instances: { [id]: Instance }, active: [id] }
 
 import { outfitFromDefault } from './outfit.js';
+import { relationshipsForInstance } from './relationships.js';
 
 /**
  * Template-only fields, not copied into an instance: library bookkeeping, and the starting outfit
@@ -44,6 +45,7 @@ export function instanceFromTemplate(template, { postures = [], states = [], con
     const card = JSON.parse(JSON.stringify(template));
     for (const k of TEMPLATE_ONLY_KEYS) delete card[k];
     card.wardrobe = card.wardrobe || [];
+    card.relationships = relationshipsForInstance(card.relationships);
     return {
         ...card,
         instanceOf: template.id,
