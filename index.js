@@ -18,35 +18,30 @@ const INJECT_SCENE_KEY = 'npcbook_scene';
 const INJECT_INSTR_KEY = 'npcbook_instructions';
 const INJECT_REMIND_KEY = 'npcbook_speaker_reminder';
 
-const DEFAULT_INSTRUCTIONS = `[Scene tracking]
-Write your reply as usual. Then, at the very end, add one <npcs> block that records what CHANGED in the scene during your reply. Do not explain or plan the block; just write it.
-
-Put in the block:
-- A character already in the scene whose posture, state, feelings or clothing changed in your reply: their "id" and only the fields that changed. Compare with the scene: if a character's mood in your reply no longer matches their listed state (listed Calm, but your reply shows cold anger), that is a change, so give the new state.
-- A character who arrived: their "id" from Known NPCs, plus "posture" and "state". Someone not in Known NPCs (or a different person who shares a name) gets "name" and "new": true, plus "traits" with [[TRAIT_KEYS]] and the profile fields shown in the example.
-- Only track characters who matter: someone with a name, or someone [[USER]] actually talks to or deals with (the innkeeper, a shopkeeper, one gate guard). Never add groups, crowds or background people (guards, patrons, townsfolk); they stay in the story text only. At most [[MAX_NEW]] new characters per reply.
-- A character who left: {"id": "...", "left": true}.
-- Report only what your reply actually shows. Leave out everyone and everything that did not change. If nothing changed, write <npcs>[]</npcs>.
-- Never list [[EXCLUDE]].
-
-Values:
-- "posture" is one of: [[POSTURES]]
-- "state" is one of: [[STATES]]
-- "feelings" is the character's private thoughts right now, 1-2 sentences.
-[[SPEAKER_RULE]]
+const DEFAULT_INSTRUCTIONS = `
+<npc_tracking_switch state=enabled>
+At the very end of EVERY reply, output one <npcs> block listing every character who is physically present in the scene at the end of your reply, except [[EXCLUDE]].
+- Characters who left the scene must be omitted. Characters who arrived must be added.
+- If nobody is present, output <npcs>[]</npcs>.
+- Reuse the exact "id" of a character already present, or listed under Known NPCs, ONLY if it is the same person (same identity: [[TRAIT_KEYS]]). Someone who merely shares a name is a different, NEW character.
+- For a character that is not present and not listed, add "new": true plus "description" (one line), "details" (full profile: appearance, personality, background, manner of speech), "height", "pronouns" and "sexual_experience".
+- Always include "traits" with: [[TRAIT_KEYS]].
+- "posture" must be one of: [[POSTURES]]
+- "state" must be one of: [[STATES]]
+- "feelings" is the character's private inner thoughts right now (1-2 sentences).
+[[COLOR_RULE]]
 [[OUTFIT_RULES]]
 
-Example:
+Format:
 <npcs>
 [
-  {"id": "existing_id", "posture": "Sitting"},
-  {"id": "other_id", "left": true},
-  {"name": "Mara", "new": true, "traits": {[[TRAIT_EXAMPLE]]}, "posture": "Standing", "state": "Curious", "feelings": "Who are these people?", "description": "Traveling herbalist.", "details": "Lean, sun-browned, grey-streaked braid. Blunt and practical, distrusts nobles. Grew up in the hill villages; speaks in short sentences.", "height": "168 cm", "pronouns": "she/her", "sexuality": "heterosexual", "sexual_experience": "experienced"}[[USER_EXAMPLE]]
+  {"id": "existing_id", "name": "Name", "traits": {[[TRAIT_EXAMPLE]]}, "posture": "...", "state": "...", "feelings": "...", "outfit": {"wear": ["item_id"], "remove": ["item_id"]}}[[USER_EXAMPLE]]
 ]
 </npcs>
 
 Known NPCs (id: name — identity):
-[[LIBRARY]]`;
+[[LIBRARY]]
+</npc_tracking_switch>`;
 
 const DEFAULT_OUTFIT_RULES = `Clothing:
 - Characters only wear items from their own wardrobe (listed in the scene). Never invent clothing for someone who has a wardrobe.
@@ -815,11 +810,11 @@ async function processLastMessage() {
                     traitKeys: s.traitKeys,
                     excludeNames,
                 });
-                for (const t of r.created) {
+                for (const [n, t] of r.created.entries()) {
                     t.color = t.color || pickColor();
                     t.folder = normFolder(s.autoFolder);
                     registerFolder(t.folder);
-                    const entry = ex.json.find(e => e && normalize(e.name) === normalize(t.name));
+                    const entry = r.createdEntries?.[n];
                     for (const ext of extensions.values()) {
                         if (typeof ext.fromTracker !== 'function' || !entry) continue;
                         try { const d = ext.fromTracker(entry, t); if (d) { t.ext = t.ext || {}; t.ext[ext.id] = d; } } catch (e) { console.warn(`[NPC Book] ${ext.id} fromTracker failed`, e); }
@@ -833,6 +828,12 @@ async function processLastMessage() {
                 }
                 if (ex.truncated) {
                     toastr.warning(`The <npcs> block was cut off before it ended (reply longer than the response length?). Used the ${ex.json.length} complete entr${ex.json.length === 1 ? 'y' : 'ies'}. Click to see it.`, 'NPC Book', { timeOut: 8000, onclick: () => showTrackerBlock(idx) });
+                }
+                if (ex.skipped) {
+                    toastr.warning(`${ex.skipped} entr${ex.skipped === 1 ? 'y' : 'ies'} in the <npcs> block could not be read and ${ex.skipped === 1 ? 'was' : 'were'} skipped. Click to see it.`, 'NPC Book', { timeOut: 8000, onclick: () => showTrackerBlock(idx) });
+                }
+                if (ex.repaired) {
+                    toastr.info(`${ex.repaired} entr${ex.repaired === 1 ? 'y' : 'ies'} had a broken part (like a stats sheet) that was dropped; the rest was kept.`, 'NPC Book');
                 }
                 if (r.created.length) {
                     save();

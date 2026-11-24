@@ -41,6 +41,8 @@ function toTrackerList(json) {
 export function salvageObjects(text) {
     const s = String(text ?? '');
     const out = [];
+    out.skipped = 0;
+    out.repaired = 0;
     let depth = 0;
     let inStr = false;
     let start = -1;
@@ -52,12 +54,42 @@ export function salvageObjects(text) {
         else if (ch === '}' && depth > 0) {
             depth--;
             if (depth === 0 && start >= 0) {
-                try { const o = parseLenientJson(s.slice(start, i + 1)); if (o && typeof o === 'object' && !Array.isArray(o)) out.push(o); } catch { /* skip broken entry */ }
+                const chunk = s.slice(start, i + 1);
+                let o = null;
+                try { o = parseLenientJson(chunk); } catch {
+                    o = dropBrokenParts(chunk);
+                    if (o) out.repaired++;
+                }
+                if (o && typeof o === 'object' && !Array.isArray(o)) out.push(o); else out.skipped++;
                 start = -1;
             }
         }
     }
     return out;
+}
+
+/** An entry that will not parse: retry with one nested object/array (an optional "gurps" sheet, say) replaced by null, last one first. */
+function dropBrokenParts(chunk) {
+    const s = String(chunk);
+    const parts = [];
+    let depth = 0;
+    let inStr = false;
+    for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (inStr) { if (ch === '\\') i++; else if (ch === '"') inStr = false; continue; }
+        if (ch === '"') { inStr = true; continue; }
+        if (ch === '{' || ch === '[') {
+            if (depth === 1) { const end = matchBracket(s, i); if (end > i) { parts.push([i, end]); i = end; continue; } }
+            depth++;
+        } else if (ch === '}' || ch === ']') depth--;
+    }
+    for (const [a, b] of parts.reverse()) {
+        try {
+            const o = parseLenientJson(`${s.slice(0, a)}null${s.slice(b + 1)}`);
+            if (o && typeof o === 'object' && !Array.isArray(o)) return o;
+        } catch { /* try the next part */ }
+    }
+    return null;
 }
 
 /**
@@ -108,8 +140,9 @@ export function extractTracker(text) {
             if (Array.isArray(json)) return { found: true, json, raw, cleaned, removed, error: null, truncated };
         } catch { /* fall through to rescue */ }
         if (!rescue) return null;
-        const rescued = salvageObjects(raw).flatMap(o => toTrackerList(o));
-        return rescued.length ? { found: true, json: rescued, raw, cleaned, removed, error: null, truncated } : null;
+        const salvaged = salvageObjects(raw);
+        const rescued = salvaged.flatMap(o => toTrackerList(o));
+        return rescued.length ? { found: true, json: rescued, raw, cleaned, removed, error: null, truncated, skipped: salvaged.skipped, repaired: salvaged.repaired } : null;
     };
     // 1) A complete, valid <npcs> block (last one first); this also reads wrapper objects with several lists.
     const closed = [...src.matchAll(/<npcs\b[^>]*>([\s\S]*?)<\/npcs>/gi)].map(x => x[1]).reverse();
@@ -143,7 +176,40 @@ export function parseLenientJson(raw) {
     const end = Math.max(endArr, endObj);
     if (end >= 0) s = s.slice(0, end + 1);
     s = s.replace(/[“”]/g, '"').replace(/[‘’]/g, '\'');
-    return JSON.parse(stripTrailingCommas(s));
+    return JSON.parse(quoteBareWords(stripTrailingCommas(s)));
+}
+
+/** Quote bare words outside strings: ["Melee", 11, A] → ["Melee", 11, "A"]. Numbers, true, false, null stay. */
+export function quoteBareWords(json) {
+    const s = String(json ?? '');
+    const num = /-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+    const word = /[A-Za-z_][A-Za-z0-9_-]*/y;
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (ch === '"') {
+            let j = i + 1;
+            while (j < s.length && s[j] !== '"') { if (s[j] === '\\') j++; j++; }
+            out += s.slice(i, j + 1);
+            i = j;
+            continue;
+        }
+        if (/[-0-9.]/.test(ch)) {
+            num.lastIndex = i;
+            const m = num.exec(s);
+            if (m) { out += m[0]; i += m[0].length - 1; } else out += ch;
+            continue;
+        }
+        if (/[A-Za-z_]/.test(ch)) {
+            word.lastIndex = i;
+            const w = word.exec(s)[0];
+            out += /^(true|false|null)$/.test(w) ? w : `"${w}"`;
+            i += w.length - 1;
+            continue;
+        }
+        out += ch;
+    }
+    return out;
 }
 
 /** Remove trailing commas before } or ] (models write them a lot); commas inside strings are left alone. */
@@ -321,6 +387,8 @@ export function cleanId(id) {
     return String(id ?? '').trim().toLowerCase().replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '');
 }
 
+function titleFromId(id) { return String(id).replace(/[_-]+/g, ' ').replace(/\b[a-z]/g, c => c.toUpperCase()).trim(); }
+
 /** True when a tracker entry says the character left the scene. */
 function isLeaving(entry) {
     if (entry.left === true || entry.leave === true || entry.gone === true || entry.present === false) return true;
@@ -340,6 +408,7 @@ export function applyTracker(list, prevRoster, { library, threshold, numericTole
     const presentIds = prev.map(i => i.id);
     const lib = { ...(library || {}) };
     const created = [];
+    const createdEntries = [];
     const updated = [];
     const skipped = [];
     const log = [];
@@ -374,7 +443,7 @@ export function applyTracker(list, prevRoster, { library, threshold, numericTole
             const initial = applyOutfitChange([], wb.wardrobe, normOutfitChange(entry), conditions).outfit;
             const t = {
                 id: newId,
-                name: nm || newId,
+                name: nm || titleFromId(newId),
                 portrait: '',
                 description: String(entry.description ?? '').trim(),
                 details: String(entry.details ?? entry.description ?? '').trim(),
@@ -386,7 +455,7 @@ export function applyTracker(list, prevRoster, { library, threshold, numericTole
                 created: Date.now(),
             };
             lib[newId] = t;
-            created.push(t);
+            created.push(t); createdEntries.push(entry);
             id = newId;
             log.push({ name: t.name, action: 'created', id, reason });
         }
@@ -415,7 +484,7 @@ export function applyTracker(list, prevRoster, { library, threshold, numericTole
         const feelings = entry.feelings ?? entry.thoughts;
         if (feelings !== undefined && feelings !== null && String(feelings).trim()) inst.feelings = String(feelings).trim();
     }
-    return { roster, created, skipped, updated: updated.filter(u => !created.some(c => c.id === u.id)), log };
+    return { roster, created, createdEntries, skipped, updated: updated.filter(u => !created.some(c => c.id === u.id)), log };
 }
 
 // ───────────────────────── wardrobe / paperdoll ─────────────────────────
