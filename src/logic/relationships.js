@@ -107,10 +107,43 @@ export function applyRelationshipChanges(list, changes, { attitudes = [], types 
     return { list: cur, changed, rejected };
 }
 
-/** The reverse entry for "both directions": `to` gets a relationship back to `from` (created once, never overwritten). */
-export function mirrorRelationship(targetList, from, rel) {
+const PAIR_SEP = /\s*(?:<->|<>|↔|⇄)\s*/;
+
+/**
+ * The relationship type list from settings. A line is one type, the same both ways ("Friend"), or a pair of types
+ * that are each other's reverse ("Employer <> Employee", "Master <> Slave"; "<->", "↔" and "⇄" also work).
+ * Returns { types: [every single type, in order], reverse: Map(type → its reverse) }.
+ */
+export function parseRelationshipTypes(lines) {
+    const types = [];
+    const reverse = new Map();
+    for (const line of Array.isArray(lines) ? lines : []) {
+        const [a, b = a] = String(line ?? '').split(PAIR_SEP).map(x => x.trim()).filter(Boolean);
+        if (!a) continue;
+        for (const t of [a, b]) if (!types.includes(t)) types.push(t);
+        reverse.set(a, b);
+        reverse.set(b, a);
+    }
+    return { types, reverse };
+}
+
+/** The single types of the settings list (for validation, the prompt and dropdowns). */
+export function relationshipTypeNames(lines) { return parseRelationshipTypes(lines).types; }
+
+/** What a type is seen as from the other side: "Employer" → "Employee"; an unpaired or unknown type stays as it is. */
+export function reverseRelationshipType(type, lines) {
+    const { reverse } = parseRelationshipTypes(lines);
+    const key = [...reverse.keys()].find(k => normalize(k) === normalize(type));
+    return key !== undefined ? reverse.get(key) : String(type ?? '');
+}
+
+/**
+ * The reverse entry for "both directions": `to` gets a relationship back to `from` (created once, never overwritten),
+ * with the paired type from the settings list (Employer → Employee) and the same attitude.
+ */
+export function mirrorRelationship(targetList, from, rel, typeLines = []) {
     const list = Array.isArray(targetList) ? targetList.map(r => ({ ...r })) : [];
     if (!from || list.some(r => r.to === from)) return { list, added: false };
-    list.push({ to: from, type: String(rel?.type ?? ''), attitude: String(rel?.attitude ?? ''), note: '' });
+    list.push({ to: from, type: reverseRelationshipType(rel?.type ?? '', typeLines), attitude: String(rel?.attitude ?? ''), note: '' });
     return { list, added: true };
 }

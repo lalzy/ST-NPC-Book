@@ -7,6 +7,7 @@ import { extensions } from '../core/runtime.js';
 import { lib, settings } from '../core/settings.js';
 import { unusedTemplates } from '../logic/instances.js';
 import { resolveRef } from '../logic/matching.js';
+import { relationshipTypeNames } from '../logic/relationships.js';
 import { SLOTS } from '../logic/slots.js';
 import { normalize } from '../logic/text.js';
 import { promptScene } from '../scene/roster.js';
@@ -48,7 +49,7 @@ export function buildInstructionText() {
         .replaceAll('[[TRAIT_KEYS]]', keys.join(', '))
         .replaceAll('[[TRAIT_EXAMPLE]]', keys.map(k => `"${k}": "${TRAIT_SAMPLES[normalize(k)] ?? 'unknown'}"`).join(', '))
         .replaceAll('[[ATTITUDES]]', (s.attitudes || []).join(', '))
-        .replaceAll('[[REL_TYPES]]', (s.relationshipTypes || []).join(', '))
+        .replaceAll('[[REL_TYPES]]', relationshipTypeNames(s.relationshipTypes).join(', '))
         .replaceAll('[[LIBRARY]]', libLines.length ? libLines.join('\n') : '(none yet)');
 }
 

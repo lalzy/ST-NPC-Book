@@ -84,6 +84,9 @@ export const DEFAULT_RELATIONSHIP_RULE = `Relationships:
 - "attitude" is one of: [[ATTITUDES]]
 - Use these exact words. Anything else is ignored.`;
 
+/** The first default relationship type list (no pairs): saved settings that still hold it exactly get the paired default. */
+export const DEFAULT_RELATIONSHIP_TYPES_V1 = ['Stranger', 'Acquaintance', 'Friend', 'Close friend', 'Lover', 'Spouse', 'Family', 'Sibling', 'Parent', 'Child', 'Mentor', 'Student', 'Employer', 'Employee', 'Colleague', 'Rival', 'Enemy'];
+
 /** The first relationship rule (free-text types): saved settings that still hold it exactly are moved to the new default. */
 export const DEFAULT_RELATIONSHIP_RULE_V1 = `Relationships:
 - When your reply changes how a character feels about someone ([[USER]] or another character), or they form a new bond, add "relationships" to that character's entry with only what changed, e.g. {"id": "...", "relationships": {"user": {"attitude": "Friendly", "note": "Saved her from the bandit."}}}.
@@ -221,8 +224,11 @@ export const DEFAULTS = {
     trackOutfits: true,
     trackRelationships: false, // optional: relationships cost context, so they are opt-in
     attitudes: ['Hostile', 'Distrustful', 'Wary', 'Neutral', 'Friendly', 'Warm', 'Close', 'Devoted'],
-    relationshipTypes: ['Stranger', 'Acquaintance', 'Friend', 'Close friend', 'Lover', 'Spouse', 'Family', 'Sibling', 'Parent', 'Child', 'Mentor', 'Student', 'Employer', 'Employee', 'Colleague', 'Rival', 'Enemy'],
+    // One type per line; "A <> B" pairs two types that are each other's reverse (used by the ⇄ link).
+    relationshipTypes: ['Stranger', 'Acquaintance', 'Friend', 'Close friend', 'Lover', 'Spouse', 'Family', 'Sibling', 'Parent <> Child', 'Mentor <> Student', 'Employer <> Employee', 'Colleague', 'Rival', 'Enemy'],
     relationshipRule: DEFAULT_RELATIONSHIP_RULE,
+    relViewLayout: 'web', // relationship view: 'web' | 'tree' (remembered)
+    relViewDepth: 2, // 1 = direct only, 2 = + their links
     includeWardrobe: true,
     allowWardrobeGrowth: true,
     wardrobeDollCollapsed: false,

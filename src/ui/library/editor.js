@@ -18,6 +18,7 @@ import { resetAssistFor } from '../assist/assistState.js';
 import { avatarHtml } from '../avatar.js';
 import { libraryPeople, whoInLibrary } from '../relationships/people.js';
 import { cleanRelationships, mountRelationships } from '../relationships/relationshipEditor.js';
+import { openRelationshipView } from '../relationships/relationshipView.js';
 import { renderRoster } from '../roster/rosterBar.js';
 import { bindTabs } from '../tabs.js';
 import { mountWardrobe } from '../wardrobe/wardrobeEditor.js';
@@ -120,6 +121,7 @@ export function selectTemplate(id, isNew = false, tab = 'card') {
         self: t.id,
         who: whoInLibrary,
         people: () => libraryPeople(t.id),
+        onWeb: (list) => openRelationshipView({ root: t.id || '__new__', rootRels: cleanRelationships(list), mode: 'library' }),
         onChange: (l) => ed.find('.npcb-tab[data-tab="relationships"]').text(`Relationships (${l.length})`),
     });
     libState.wardrobeUi = mountWardrobe(ed.find('.npcb-wd-host'), libState.draftWardrobe, {
@@ -263,7 +265,7 @@ async function saveTemplateFromEditor(t, isNew) {
     registerFolder(lib()[id].folder);
     // "Both directions": give the other card the relationship back (only if it has none towards this NPC yet).
     for (const r of libState.draftRelationships.filter(x => x.mirror && x.to !== id && lib()[x.to])) {
-        lib()[r.to].relationships = mirrorRelationship(lib()[r.to].relationships, id, r).list;
+        lib()[r.to].relationships = mirrorRelationship(lib()[r.to].relationships, id, r, settings().relationshipTypes).list;
     }
     save();
     toastr.success(`Saved ${name}.`, 'NPC Book');

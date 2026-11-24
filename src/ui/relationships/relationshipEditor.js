@@ -4,12 +4,14 @@
 
 import { settings } from '../../core/settings.js';
 import { esc } from '../../core/utils.js';
-import { USER_REF, relationshipDrift } from '../../logic/relationships.js';
+import { USER_REF, relationshipDrift, relationshipTypeNames, reverseRelationshipType } from '../../logic/relationships.js';
 import { normalize } from '../../logic/text.js';
 import { avatarHtml } from '../avatar.js';
+import { injectStyle } from '../injectStyle.js';
 
-const STYLE = `
+const EDITOR_STYLE = `
 .npcb-rel-list{display:flex;flex-direction:column;gap:6px}
+.npcb-rel-bar{display:flex;align-items:center;gap:6px;margin-bottom:6px}
 .npcb-rel-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px;border:1px solid var(--SmartThemeBorderColor,#3a3d46);border-radius:8px}
 .npcb-rel-who{display:flex;align-items:center;gap:6px;flex:1 1 150px;min-width:0}
 .npcb-rel-who b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -27,13 +29,6 @@ const STYLE = `
 .npcb-rel-pick:hover{background:var(--black30a,rgba(0,0,0,.25))}
 `;
 
-function ensureStyle() {
-    if (document.getElementById('npcb_rel_style')) return;
-    const el = document.createElement('style');
-    el.id = 'npcb_rel_style';
-    el.textContent = STYLE;
-    document.head.appendChild(el);
-}
 
 /**
  * Mount the editor. `list` is mutated in place (a draft the caller saves). Rows may carry `mirror: true`
@@ -43,14 +38,15 @@ function ensureStyle() {
  *   people()  → [{ group, id, name, sub, card }] everyone who can be added (existing targets are filtered out here)
  *   chat      true in the in-chat card: shows how each relationship drifted in this chat
  *   onChange  called after every change (e.g. to update a tab count)
+ *   onWeb     when given, an icon button opens the relationship web/tree view
  */
-export function mountRelationships(host, list, { self = '', who, people, chat = false, onChange } = {}) {
-    ensureStyle();
+export function mountRelationships(host, list, { self = '', who, people, chat = false, onChange, onWeb } = {}) {
+    injectStyle('npcb_rel_style', EDITOR_STYLE);
     const st = { picking: false, q: '' };
     const attitudes = () => settings().attitudes || [];
     const changed = () => onChange?.(list);
     // Type and attitude are picked from the settings lists; a value from before the lists existed stays selectable.
-    const types = () => settings().relationshipTypes || [];
+    const types = () => relationshipTypeNames(settings().relationshipTypes);
     const listOptions = (list, cur) => {
         const all = [...list];
         if (cur && !all.includes(cur)) all.unshift(cur);
@@ -63,6 +59,7 @@ export function mountRelationships(host, list, { self = '', who, people, chat = 
         if (!cur) all.unshift('');
         return all.map(x => `<option value="${esc(x)}" ${x === cur ? 'selected' : ''}>${esc(x || '—')}</option>`).join('');
     };
+    const mirrorTitle = (name, type) => `Link: ${name} gets ${type ? `"${reverseRelationshipType(type, settings().relationshipTypes)}"` : 'the reverse relationship'} back (on Save)`;
     const rowHtml = (r, i) => {
         const p = who(r.to) || { name: r.to, sub: r.to };
         const drift = chat ? relationshipDrift(r) : '';
@@ -73,7 +70,7 @@ export function mountRelationships(host, list, { self = '', who, people, chat = 
             <select class="text_pole npcb-rel-type" aria-label="Relationship type">${listOptions(types(), r.type || '')}</select>
             <select class="text_pole npcb-rel-att" aria-label="Attitude">${attOptions(r.attitude || '')}</select>
             <input class="text_pole npcb-rel-note" value="${esc(r.note || '')}" placeholder="note (optional, sent to the LLM)" aria-label="Note">
-            ${r.to !== USER_REF ? `<div class="menu_button npcb-rel-btn npcb-rel-mirror ${r.mirror ? 'on' : ''}" title="Both directions: ${esc(p.name)} gets the same relationship back (on Save)"><i class="fa-solid fa-right-left"></i></div>` : ''}
+            ${r.to !== USER_REF ? `<div class="menu_button npcb-rel-btn npcb-rel-mirror ${r.mirror ? 'on' : ''}" title="${esc(mirrorTitle(p.name, r.type))}"><i class="fa-solid fa-right-left"></i></div>` : ''}
             <div class="menu_button npcb-rel-btn npcb-rel-del" title="Remove relationship"><i class="fa-solid fa-trash-can"></i></div>
             ${was ? `<div class="npcb-rel-was">${esc(was)}</div>` : ''}
         </div>`;
@@ -89,14 +86,16 @@ export function mountRelationships(host, list, { self = '', who, people, chat = 
         </div>`;
     };
     const draw = () => {
-        host.html(`<div class="npcb-rel-list">${list.length ? list.map(rowHtml).join('') : '<div class="npcb-empty">No relationships yet.</div>'}</div>
-            <div class="npcb-row"><div class="menu_button npcb-rel-add"><i class="fa-solid fa-plus"></i> Add relationship</div></div>
-            ${st.picking ? pickerHtml() : ''}`);
+        host.html(`<div class="npcb-row npcb-rel-bar"><div class="menu_button npcb-rel-add"><i class="fa-solid fa-plus"></i> Add relationship</div>
+                ${onWeb ? '<span class="npcb-spacer" style="flex:1"></span><div class="menu_button npcb-rel-btn npcb-rel-web" title="Relationship web" aria-label="Relationship web"><i class="fa-solid fa-circle-nodes"></i></div>' : ''}</div>
+            ${st.picking ? pickerHtml() : ''}
+            <div class="npcb-rel-list">${list.length ? list.map(rowHtml).join('') : '<div class="npcb-empty">No relationships yet.</div>'}</div>`);
         if (st.picking) host.find('.npcb-rel-q').trigger('focus');
     };
     const at = (el) => list[Number($(el).closest('.npcb-rel-row').data('i'))];
     host.off('.rel');
     host.on('click.rel', '.npcb-rel-add', () => { st.picking = !st.picking; st.q = ''; draw(); });
+    host.on('click.rel', '.npcb-rel-web', () => onWeb?.(list));
     host.on('input.rel', '.npcb-rel-q', (e) => {
         st.q = String(e.target.value);
         const pos = e.target.selectionStart;
@@ -111,7 +110,13 @@ export function mountRelationships(host, list, { self = '', who, people, chat = 
         draw(); changed();
         host.find('.npcb-rel-row').last().find('.npcb-rel-type').trigger('focus');
     });
-    host.on('change.rel', '.npcb-rel-type', (e) => { const r = at(e.target); if (r) { r.type = String(e.target.value); changed(); } });
+    host.on('change.rel', '.npcb-rel-type', (e) => {
+        const r = at(e.target);
+        if (!r) return;
+        r.type = String(e.target.value);
+        $(e.target).closest('.npcb-rel-row').find('.npcb-rel-mirror').attr('title', mirrorTitle(who(r.to)?.name ?? r.to, r.type));
+        changed();
+    });
     host.on('change.rel', '.npcb-rel-att', (e) => { const r = at(e.target); if (r) { r.attitude = String(e.target.value); changed(); } });
     host.on('input.rel', '.npcb-rel-note', (e) => { const r = at(e.target); if (r) { r.note = String(e.target.value).trim(); changed(); } });
     host.on('click.rel', '.npcb-rel-mirror', (e) => { const r = at(e.target); if (r) { r.mirror = !r.mirror; $(e.currentTarget).toggleClass('on', r.mirror); } });

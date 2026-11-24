@@ -28,6 +28,7 @@ export function registerEventHandlers() {
     }
     eventSource.on(eventTypes.SETTINGS_UPDATED, renderPmStatus);
     eventSource.on(eventTypes.PERSONA_CHANGED, () => { closePopovers(); renderRoster(); });
-    $(document).on('click', (e) => { if (!$(e.target).closest('.npcb-popover').length) closePopovers(); });
+    // Clicks inside a popup opened from a popover (e.g. the relationship view) keep that popover open.
+    $(document).on('click', (e) => { if (!$(e.target).closest('.npcb-popover, dialog.popup, .popup').length) closePopovers(); });
     $(document).on('keydown', (e) => { if (e.key === 'Escape') { closePopovers(); closeLibrary(); } });
 }

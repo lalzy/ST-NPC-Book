@@ -10,6 +10,7 @@ import { clone, sig } from '../core/utils.js';
 import { attachInstance, cloneScene, toScene } from '../logic/instances.js';
 import { resolveRef } from '../logic/matching.js';
 import { applyOutfitChange, normOutfitChange } from '../logic/outfit.js';
+import { relationshipTypeNames } from '../logic/relationships.js';
 import { normalize, pickEnum } from '../logic/text.js';
 import { applyTracker } from '../logic/trackerApply.js';
 import { extractTracker } from '../logic/trackerParse.js';
@@ -129,7 +130,7 @@ export async function processLastMessage() {
                     allowWardrobeGrowth: s.allowWardrobeGrowth,
                     trackRelationships: s.trackRelationships,
                     attitudes: s.attitudes,
-                    relationshipTypes: s.relationshipTypes,
+                    relationshipTypes: relationshipTypeNames(s.relationshipTypes),
                     userName: c.name1,
                     autoCreate: s.autoCreate,
                     maxNew: Number(s.maxNewPerReply) || 0,

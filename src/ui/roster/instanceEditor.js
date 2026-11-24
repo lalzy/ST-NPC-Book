@@ -11,6 +11,7 @@ import { openLibrary } from '../library/modal.js';
 import { closePopovers, placePopover } from '../popover.js';
 import { chatPeople, whoInChat } from '../relationships/people.js';
 import { cleanRelationships, mountRelationships } from '../relationships/relationshipEditor.js';
+import { openRelationshipView } from '../relationships/relationshipView.js';
 import { bindTabs } from '../tabs.js';
 import { mountPaperdoll } from '../wardrobe/paperdoll.js';
 import { mountWardrobe } from '../wardrobe/wardrobeEditor.js';
@@ -65,6 +66,7 @@ export function openInstanceEditor(id, anchor) {
         chat: true,
         who: (to) => whoInChat(scene0, to),
         people: () => chatPeople(scene0, id),
+        onWeb: (list) => openRelationshipView({ root: id, rootRels: cleanRelationships(list), mode: 'chat' }),
         onChange: (l) => pop.find('.npcb-tab[data-tab="relations"]').text(`Relations (${l.length})`),
     });
     const showTab = (tab) => pop.find(`.npcb-tab[data-tab="${tab}"]`).trigger('click');
@@ -97,7 +99,7 @@ export function openInstanceEditor(id, anchor) {
             target.relationships = cleanRelationships(draftRelations);
             // "Both directions": the other NPC's copy in this chat gets the relationship back (only if it has none yet).
             for (const r of draftRelations.filter(x => x.mirror && scene.instances[x.to])) {
-                scene.instances[r.to].relationships = mirrorRelationship(scene.instances[r.to].relationships, id, r).list;
+                scene.instances[r.to].relationships = mirrorRelationship(scene.instances[r.to].relationships, id, r, s.relationshipTypes).list;
             }
             writeCurrentScene(scene);
         }
