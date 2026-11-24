@@ -12,6 +12,40 @@ export const INJECT_REMIND_KEY = 'npcbook_speaker_reminder';
 
 export const DEFAULT_INSTRUCTIONS = `
 <npc_tracking_switch state=enabled>
+Write your reply as usual. Then, at the very end, add one <npcs> block that records what CHANGED in the scene during your reply. Do not explain or plan the block; just write it.
+
+Put in the block:
+- A character already in the scene whose posture, state, feelings or clothing changed in your reply: their "id" and only the fields that changed. Compare with the scene: if a character's mood in your reply no longer matches their listed state (listed Calm, but your reply shows cold anger), that is a change, so give the new state.
+- A character who arrived: their "id" from Known NPCs, plus "posture" and "state". Someone not in Known NPCs (or a different person who shares a name) gets "name" and "new": true, plus "traits" with [[TRAIT_KEYS]], the profile fields, and always a "wardrobe" of 4-8 items that fit their role (a guard: armor, uniform, boots) with an "outfit" for what they wear now, as in the example.
+- Track characters who matter: anyone with a name, and the first individual who speaks to or deals directly with [[USER]] (the guard who stops them at the gate, the innkeeper, a shopkeeper). Name an unnamed one by role, e.g. "Gate Guard". Guards, patrons and townsfolk who only watch or stand around are background: leave them out. At most [[MAX_NEW]] new characters per reply.
+- A character who left: {"id": "...", "left": true}.
+- Report only what your reply actually shows. Leave out everyone and everything that did not change.
+- Every reply ends with the <npcs> block, even when nothing changed: write <npcs>[]</npcs>. A reply without it is incomplete.
+- Never list [[EXCLUDE]].
+
+Values:
+- "posture" is one of: [[POSTURES]]
+- "state" is one of: [[STATES]]
+- "feelings" is the character's private thoughts right now, 1-2 sentences.
+[[SPEAKER_RULE]]
+[[OUTFIT_RULES]]
+
+Example:
+<npcs>
+[
+  {"id": "existing_id", "posture": "Sitting"},
+  {"id": "other_id", "left": true},
+    {"name": "Mara", "new": true, "traits": {[[TRAIT_EXAMPLE]]}, "posture": "Standing", "state": "Curious", "feelings": "Who are these people?", "description": "Traveling herbalist.", "details": "Lean, sun-browned, grey-streaked braid. Blunt and practical, distrusts nobles. Grew up in the hill villages; speaks in short sentences.", "height": "168 cm", "pronouns": "she/her", "sexuality": "heterosexual", "sexual_experience": "experienced", "wardrobe": [{"name": "Green wool dress", "slots": ["upper_outer", "lower_outer"]}, {"name": "Linen shift", "slots": ["upper_inner", "lower_inner"]}, {"name": "Leather boots", "slots": ["feet_outer"]}, {"name": "Hooded travel cloak", "slots": ["cover"]}, {"name": "Herb satchel", "slots": ["other"]}], "outfit": {"wear": ["Green wool dress", "Leather boots", "Herb satchel"]}}[[USER_EXAMPLE]]
+]
+</npcs>
+
+Known NPCs (id: name — identity):
+[[LIBRARY]]
+</npc_tracking_switch >`;
+
+/** The previous default tracking prompt: saved settings that still hold it exactly are moved to the new default. */
+export const DEFAULT_INSTRUCTIONS_V1 = `
+<npc_tracking_switch state=enabled>
 At the very end of EVERY reply, output one <npcs> block listing every character who is physically present in the scene at the end of your reply, except [[EXCLUDE]].
 - Characters who left the scene must be omitted. Characters who arrived must be added.
 - If nobody is present, output <npcs>[]</npcs>.
@@ -141,6 +175,7 @@ export const DEFAULT_USER_RULE = `- When [[USER]]'s posture or clothing changes,
 
 export const DEFAULTS = {
     enabled: true,
+    debug: false,
     injectMode: 'pm', // 'pm' = Prompt Manager entries / macros, 'auto' = extension prompt with depth
     scenePosition: 1, sceneDepth: 2, sceneRole: 0,
     instrPosition: 1, instrDepth: 0, instrRole: 0,

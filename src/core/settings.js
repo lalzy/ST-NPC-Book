@@ -1,6 +1,6 @@
 // Extension settings: load with defaults and migrations, save, and the NPC library stored in them.
 
-import { DEFAULTS, DEFAULT_PORTRAIT_LLM_PROMPT, DEFAULT_PORTRAIT_LLM_PROMPT_V1, MODULE } from '../constants.js';
+import { DEFAULTS, DEFAULT_INSTRUCTIONS, DEFAULT_INSTRUCTIONS_V1, DEFAULT_PORTRAIT_LLM_PROMPT, DEFAULT_PORTRAIT_LLM_PROMPT_V1, MODULE } from '../constants.js';
 import { ctx } from './context.js';
 
 export function settings() {
@@ -21,6 +21,8 @@ export function settings() {
     if (JSON.stringify(s.traitKeys) === JSON.stringify(['age', 'gender', 'role'])) s.traitKeys = ['race', 'age', 'gender', 'role'];
     if (!s.portraitTemplateV2 && s.portraitLlmPrompt === DEFAULT_PORTRAIT_LLM_PROMPT_V1) s.portraitLlmPrompt = DEFAULT_PORTRAIT_LLM_PROMPT;
     s.portraitTemplateV2 = true;
+    // Unedited copies of the previous default tracking prompt follow the new default; edited ones are left alone.
+    if (typeof s.instructions === 'string' && s.instructions.trim() === DEFAULT_INSTRUCTIONS_V1.trim()) s.instructions = DEFAULT_INSTRUCTIONS;
     // New clothing used to be ignored by default. Now that it only ever goes into a chat's own NPC instance, it is on;
     // switched on once for existing installs, after which the checkbox is respected.
     if (!s.wardrobeGrowthV2) { s.allowWardrobeGrowth = true; s.wardrobeGrowthV2 = true; }

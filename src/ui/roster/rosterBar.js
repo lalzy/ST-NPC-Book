@@ -42,6 +42,7 @@ export function renderRoster() {
     const bar = $('#npcb_roster');
     if (!s.enabled || !hasChat()) { bar.hide(); updateAutoInjection(); return; }
     bar.show().toggleClass('npcb-collapsed', !!s.rosterCollapsed);
+    bar.find('.npcb-roster-block').toggle(!!s.debug); // debug tool: last <npcs> block
     const roster = currentRoster();
     bar.find('.npcb-roster-count').text(roster.length ? `(${roster.length})` : '');
     const cards = roster.map(inst => {

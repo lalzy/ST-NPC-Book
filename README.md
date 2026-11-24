@@ -22,7 +22,6 @@ To prevent LLM Hallucination drift (User is standing, hair swaying in the wind, 
 ![NPC Book creation](image1.png)
 ![During chat pop-up and NPC listing](image2.png)
 
-
 ## Install
 In SillyTavern, open **Extensions** (the stacked-cubes icon) → **Install extension**, paste this link and install:
 
@@ -33,11 +32,13 @@ https://github.com/lalzy/ST-NPC-Book
 Or install it manually: download this repository and put the files in `SillyTavern/data/<your-user>/extensions/NPC-Book/`, then reload SillyTavern.
 
 ## Setup
-1. Open **Extensions** → **NPC Book** and click **Add entries to Prompt Manager**.
+1. Open **Extensions** → **NPC Book**, expand the **Injection** section and click **Add entries to Prompt Manager**.
 2. Open your Prompt Manager. You'll find two new entries, *NPC Book — Instructions* and *NPC Book — Present NPCs*. Leave them where they are, or move them wherever you like.
 3. Click the new **NPC Book** button in the top bar (next to Character Management) to start making NPCs.
 
-Using Text Completion? There is no Prompt Manager there, so set **Mode** to *Auto inject* in the NPC Book settings instead.
+Using Text Completion? There is no Prompt Manager there. In the **Injection** section, set **Mode** to *Auto inject* instead, or put `{{npcInstructions}}` and `{{npcScene}}` in your Story String yourself.
+
+Every setting has an ⓘ icon: hover over it for a short explanation, or click it for the full text. Long prompts open in their own editor, with a **Reset to default** button.
 
 ## Using it
 
