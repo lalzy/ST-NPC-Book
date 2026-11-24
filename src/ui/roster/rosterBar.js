@@ -3,7 +3,6 @@
 import { getUserAvatar } from '../../../../../../personas.js';
 import { HEX_RE } from '../../constants.js';
 import { ctx, hasChat } from '../../core/context.js';
-import { templateFor } from '../../core/npcs.js';
 import { save, settings } from '../../core/settings.js';
 import { esc } from '../../core/utils.js';
 import { ensurePortrait } from '../../portraits/portraitQueue.js';
@@ -46,8 +45,8 @@ export function renderRoster() {
     const roster = currentRoster();
     bar.find('.npcb-roster-count').text(roster.length ? `(${roster.length})` : '');
     const cards = roster.map(inst => {
-        const t = templateFor(inst);
-        if (t && !t.portrait) ensurePortrait(t.id);
+        const t = inst; // the chat's instance carries its own card fields
+        if (!t.portrait) ensurePortrait(t.id, { target: 'instance' });
         const name = t?.name ?? inst.name ?? inst.id;
         const sub = [inst.posture, inst.state].filter(Boolean).join(' · ');
         return `<div class="npcb-card" data-id="${esc(inst.id)}" title="${esc(name)}${inst.feelings ? `\n💭 ${esc(inst.feelings)}` : ''}">

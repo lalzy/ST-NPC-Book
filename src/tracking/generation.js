@@ -1,12 +1,13 @@
 // Generation hooks: capture the scene before a reply, then apply the reply's <npcs> block.
 
 import { MODULE } from '../constants.js';
-import { ctx, excludedNames, meta } from '../core/context.js';
+import { ctx, excludedNames } from '../core/context.js';
 import { normFolder, registerFolder } from '../core/folders.js';
 import { pickColor } from '../core/npcs.js';
 import { extensions, runtime } from '../core/runtime.js';
 import { lib, save, settings } from '../core/settings.js';
 import { clone, sig } from '../core/utils.js';
+import { attachInstance, cloneScene, toScene } from '../logic/instances.js';
 import { resolveRef } from '../logic/matching.js';
 import { applyOutfitChange, normOutfitChange } from '../logic/outfit.js';
 import { normalize, pickEnum } from '../logic/text.js';
@@ -14,7 +15,7 @@ import { applyTracker } from '../logic/trackerApply.js';
 import { extractTracker } from '../logic/trackerParse.js';
 import { updateAutoInjection } from '../prompt/injection.js';
 import { adaptUser, currentUser, personaData, userBefore } from '../scene/persona.js';
-import { currentRoster, newInstance, rosterBefore, snapOf } from '../scene/roster.js';
+import { currentScene, instanceOpts, sceneBefore, snapOf } from '../scene/roster.js';
 import { renderLibraryList } from '../ui/library/libraryList.js';
 import { renderRoster } from '../ui/roster/rosterBar.js';
 import { showTrackerBlock } from '../ui/trackerBlock.js';
@@ -28,24 +29,30 @@ function isGreetingIdx(idx) {
 }
 
 /**
- * Starting cast for regenerating a greeting: the given roster, plus the cast read from the greeting's
- * "characters" block (any swipe), plus the main character card when "Track the main character" is on.
+ * Starting scene for regenerating a greeting: the given scene, plus the cast read from the greeting's
+ * "characters" block (any swipe, using the instances made there), plus the main character when
+ * "Track the main character" is on (its instance in this chat, else a new one from its template).
  */
 function greetingCast(idx, base) {
     const s = settings();
     const c = ctx();
     const msg = (c.chat || [])[idx];
-    const roster = clone(base || []);
-    const has = (id) => roster.some(x => x.id === id);
+    const scene = cloneScene(base);
     const snaps = [snapOf(msg), ...(Array.isArray(msg?.swipe_info) ? msg.swipe_info.map(si => si?.extra?.[MODULE]) : [])].filter(Boolean);
-    const greet = snaps.find(x => x.greeting && Array.isArray(x.post) && x.post.length);
-    for (const inst of greet?.post || []) if (inst?.id && !has(inst.id)) roster.push(clone(inst));
+    const greet = snaps.find(x => x.greeting && toScene(x.post).active.length);
+    if (greet) {
+        const g = toScene(greet.post);
+        for (const id of g.active) {
+            if (!scene.instances[id] && g.instances[id]) scene.instances[id] = clone(g.instances[id]);
+            if (scene.instances[id] && !scene.active.includes(id)) scene.active.push(id);
+        }
+    }
     const assistantMode = c.characterId === undefined && !c.groupId;
     if (s.trackChar && !assistantMode && !c.groupId && c.name2) {
-        const id = resolveRef(c.name2, lib());
-        if (id && !has(id)) roster.push(newInstance(id));
+        const id = resolveRef(c.name2, scene.instances) ?? resolveRef(c.name2, lib());
+        if (id) attachInstance(scene, id, lib(), instanceOpts());
     }
-    return roster;
+    return scene;
 }
 
 export function onGenerationStarted(type, _opts, dryRun) {
@@ -54,16 +61,19 @@ export function onGenerationStarted(type, _opts, dryRun) {
     if (type === 'quiet' || type === 'impersonate') { updateAutoInjection(); return; }
     const lastIdx = chat.length - 1;
     const last = chat[lastIdx];
-    if ((type === 'swipe' || type === 'continue') && last && !last.is_user) {
-        const m = meta();
-        const metaHit = m?.pre && m.pre.idx === lastIdx;
-        let pre = metaHit ? m.pre.roster : (snapOf(last)?.pre ?? rosterBefore(lastIdx));
+    const replay = (type === 'swipe' || type === 'regenerate') && last && !last.is_user;
+    if (replay || (type === 'continue' && last && !last.is_user)) {
+        // Swipe / regenerate replays the last reply from the end of the message before it. Nothing from the reply being
+        // replaced carries over: not its NPC changes (arrivals, departures, feelings) and not manual edits made after it.
+        // ("regenerate" fires while the old reply is still in the chat, so it must be treated like a swipe.)
+        // Continue extends the same reply, so it starts from that reply's own starting scene.
+        let pre = replay ? sceneBefore(lastIdx) : toScene(snapOf(last)?.pre ?? sceneBefore(lastIdx));
         // Regenerating a greeting: the scene "before" it is empty, so seed it with the greeting's cast + the main character card.
         if (isGreetingIdx(lastIdx)) pre = greetingCast(lastIdx, pre);
-        const preUser = (metaHit && m.pre.user) ? m.pre.user : (snapOf(last)?.preUser ?? userBefore(lastIdx));
+        const preUser = replay ? userBefore(lastIdx) : (snapOf(last)?.preUser ?? userBefore(lastIdx));
         runtime.genCtx = { type, pre: clone(pre), preUser: clone(adaptUser(preUser)), targetIdx: lastIdx };
     } else {
-        runtime.genCtx = { type, pre: clone(currentRoster()), preUser: clone(currentUser()), targetIdx: null };
+        runtime.genCtx = { type, pre: clone(currentScene()), preUser: clone(currentUser()), targetIdx: null };
     }
     updateAutoInjection();
 }
@@ -85,9 +95,9 @@ export async function processLastMessage() {
     let processed = null;
     try {
         const ex = exPeek;
-        const pre = g.pre ?? rosterBefore(idx);
+        const pre = toScene(g.pre ?? sceneBefore(idx));
         const preUser = adaptUser(g.preUser ?? userBefore(idx));
-        let post = (g.type === 'continue' && existing?.post) ? existing.post : pre;
+        let post = (g.type === 'continue' && existing?.post) ? toScene(existing.post) : pre;
         let postUser = (g.type === 'continue' && existing?.postUser) ? adaptUser(existing.postUser) : preUser;
         let trackLog = [];
         if (ex.found) {
@@ -121,20 +131,18 @@ export async function processLastMessage() {
                     maxNew: Number(s.maxNewPerReply) || 0,
                     traitKeys: s.traitKeys,
                     excludeNames,
+                    // A new NPC's template is finished here, before its instance is copied from it.
+                    prepareNew: (t, entry) => {
+                        t.color = t.color || pickColor();
+                        t.folder = normFolder(s.autoFolder);
+                        registerFolder(t.folder);
+                        for (const ext of extensions.values()) {
+                            if (typeof ext.fromTracker !== 'function' || !entry) continue;
+                            try { const d = ext.fromTracker(entry, t); if (d) { t.ext = t.ext || {}; t.ext[ext.id] = d; } } catch (e) { console.warn(`[NPC Book] ${ext.id} fromTracker failed`, e); }
+                        }
+                    },
                 });
-                for (const [n, t] of r.created.entries()) {
-                    t.color = t.color || pickColor();
-                    t.folder = normFolder(s.autoFolder);
-                    registerFolder(t.folder);
-                    const entry = r.createdEntries?.[n];
-                    for (const ext of extensions.values()) {
-                        if (typeof ext.fromTracker !== 'function' || !entry) continue;
-                        try { const d = ext.fromTracker(entry, t); if (d) { t.ext = t.ext || {}; t.ext[ext.id] = d; } } catch (e) { console.warn(`[NPC Book] ${ext.id} fromTracker failed`, e); }
-                    }
-                    lib()[t.id] = t;
-                }
-                for (const t of r.updated || []) lib()[t.id] = t;
-                if (r.updated?.length) save();
+                for (const t of r.created) lib()[t.id] = t;
                 if (r.skipped?.length) {
                     toastr.warning(`Skipped ${r.skipped.length} more new character${r.skipped.length > 1 ? 's' : ''} (limit ${s.maxNewPerReply} per reply): ${r.skipped.join(', ')}`, 'NPC Book');
                 }
@@ -152,7 +160,8 @@ export async function processLastMessage() {
                     toastr.info(`New NPC${r.created.length > 1 ? 's' : ''}: ${r.created.map(t => `${t.name} (${t.id})`).join(', ')}`, 'NPC Book');
                     renderLibraryList();
                 }
-                post = r.roster;
+                for (const l of r.log.filter(x => x.action === 'wardrobe-added')) toastr.info(`${l.name} got: ${l.items.join(', ')}`, 'NPC Book');
+                post = r.scene;
                 trackLog = r.log.map(l => `${l.action}: ${l.name ?? l.id ?? ''}${l.id && l.name && l.id !== l.name ? ` (${l.id})` : ''}${l.items ? ` [${l.items.join(', ')}]` : ''}`);
             } else {
                 console.warn('[NPC Book] could not parse tracker block:', ex.error, ex.raw);
@@ -172,8 +181,6 @@ export async function processLastMessage() {
             msg.swipe_info[msg.swipe_id].extra = msg.swipe_info[msg.swipe_id].extra || {};
             msg.swipe_info[msg.swipe_id].extra[MODULE] = clone(snap);
         }
-        const m = meta();
-        if (m) m.pre = { idx, roster: clone(pre), user: clone(preUser) };
         g.idx = idx;
         await c.saveChat();
         c.saveMetadataDebounced?.();

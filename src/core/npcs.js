@@ -11,8 +11,6 @@ export function pickColor() {
     return pool[Math.floor(Math.random() * pool.length)];
 }
 
-export function templateFor(inst) { return lib()[inst.id] || null; }
-
 export function portraitUrl(t) { return t?.portrait || ''; }
 
 /** Profile fields of a card; pronouns fall back to the gender default when empty. */

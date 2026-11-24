@@ -5,10 +5,11 @@ import { ctx, excludedNames, hasChat } from '../core/context.js';
 import { traitSummary } from '../core/npcs.js';
 import { extensions } from '../core/runtime.js';
 import { lib, settings } from '../core/settings.js';
+import { unusedTemplates } from '../logic/instances.js';
 import { resolveRef } from '../logic/matching.js';
 import { SLOTS } from '../logic/slots.js';
 import { normalize } from '../logic/text.js';
-import { promptRoster } from '../scene/roster.js';
+import { promptScene } from '../scene/roster.js';
 
 function extInstructions() {
     const out = [];
@@ -24,12 +25,14 @@ export function buildInstructionText() {
     if (!s.enabled || !hasChat()) return '';
     const c = ctx();
     const keys = s.traitKeys.length ? s.traitKeys : ['race', 'age', 'gender', 'role'];
-    const libLines = s.includeLibrary
-        ? Object.values(lib()).sort((a, b) => a.name.localeCompare(b.name)).map(t => {
-            const tr = traitSummary(t);
-            return `${t.id}: ${t.name}${tr ? ` — ${tr}` : ''}`;
-        })
-        : [];
+    // Known NPCs: everyone this chat has met (its instances), then library templates it has not used yet.
+    const scene = promptScene();
+    const line = (t) => { const tr = traitSummary(t); return `${t.id}: ${t.name}${tr ? ` — ${tr}` : ''}`; };
+    const byName = (a, b) => String(a.name).localeCompare(String(b.name));
+    const libLines = [
+        ...Object.values(scene.instances).sort(byName).map(line),
+        ...(s.includeLibrary ? Object.values(unusedTemplates(scene, lib())).sort(byName).map(line) : []),
+    ];
     return String(s.instructions || '')
         .replaceAll('[[SPEAKER_RULE]]', s.enabled && s.speakerPortraits ? s.speakerRule : '')
         .replaceAll('[[OUTFIT_RULES]]', [s.trackOutfits ? s.outfitRules : '', s.trackUser ? DEFAULT_USER_RULE : '', ...extInstructions()].filter(Boolean).join('\n'))
@@ -50,9 +53,10 @@ export function buildInstructionText() {
 /** Ids of the characters the next reply may voice: the scene, plus the main character when it is tracked. */
 function speakerIds() {
     const c = ctx();
-    const ids = promptRoster().map(i => i.id);
+    const scene = promptScene();
+    const ids = [...scene.active];
     if (settings().trackChar && c.characterId !== undefined && !c.groupId && c.name2) {
-        const id = resolveRef(c.name2, lib());
+        const id = resolveRef(c.name2, scene.instances) ?? resolveRef(c.name2, lib());
         if (id && !ids.includes(id)) ids.unshift(id);
     }
     return ids;

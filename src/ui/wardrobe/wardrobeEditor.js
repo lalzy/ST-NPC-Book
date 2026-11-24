@@ -17,24 +17,27 @@ const primarySlot = (item) => [...(item.slots || [])].sort((a, b) => slotIndex(a
  * Wardrobe editor: collapsible starting-outfit doll on the left, compact item list on the right
  * (grouped by slot, search, filters, sort, inline item editor, bulk actions, quick add).
  * Mutates data = { wardrobe: [], defaultWorn: [] } in place. Returns { refresh }.
+ * startingOutfit: false hides everything about the starting outfit (doll, ★ marks, ★ filter, ★ bulk action) —
+ * for a chat's NPC instance, whose current outfit is edited elsewhere and which has no starting outfit.
  */
-export function mountWardrobe(host, data, { key = '', onChange } = {}) {
+export function mountWardrobe(host, data, { key = '', onChange, startingOutfit = true } = {}) {
     const s = settings();
+    if (!Array.isArray(data.defaultWorn)) data.defaultWorn = [];
     if (!wardrobeUi.has(key)) wardrobeUi.set(key, { open: new Set() });
     const ui = wardrobeUi.get(key);
     const st = { q: '', slot: '', starOnly: false, sort: 'slot', expanded: null, selected: new Set() };
-    host.html(`<div class="npcb-wdx ${s.wardrobeDollCollapsed ? 'npcb-doll-collapsed' : ''}">
-        <div class="npcb-wdx-doll">
+    host.html(`<div class="npcb-wdx ${!startingOutfit ? 'npcb-doll-collapsed npcb-wdx-nostart' : s.wardrobeDollCollapsed ? 'npcb-doll-collapsed' : ''}">
+        ${startingOutfit ? `<div class="npcb-wdx-doll">
             <div class="npcb-wdx-dollhead"><span>Starting outfit</span><i class="fa-solid fa-angles-left npcb-wdx-dolltoggle" title="Hide starting outfit"></i></div>
             <div class="npcb-wdx-grid"></div>
             <small class="npcb-dim npcb-wdx-hint"></small>
-        </div>
+        </div>` : ''}
         <div class="npcb-wdx-list">
             <div class="npcb-wdx-tb">
-                <i class="fa-solid fa-angles-right npcb-wdx-dollshow" title="Show starting outfit"></i>
+                ${startingOutfit ? '<i class="fa-solid fa-angles-right npcb-wdx-dollshow" title="Show starting outfit"></i>' : ''}
                 <input type="search" class="text_pole npcb-wdx-q" placeholder="Search…">
                 <select class="text_pole npcb-wdx-slot"><option value="">All slots</option>${SLOTS.map(x => `<option value="${x.key}">${esc(x.label)}</option>`).join('')}</select>
-                <span class="npcb-chip npcb-wdx-staronly" title="Only items worn at the start">★</span>
+                ${startingOutfit ? '<span class="npcb-chip npcb-wdx-staronly" title="Only items worn at the start">★</span>' : ''}
                 <select class="text_pole npcb-wdx-sort"><option value="slot">By slot</option><option value="name">By name</option><option value="recent">Newest</option></select>
             </div>
             <div class="npcb-wdx-rows"></div>
@@ -58,6 +61,7 @@ export function mountWardrobe(host, data, { key = '', onChange } = {}) {
     };
 
     const drawDoll = () => {
+        if (!startingOutfit) return;
         const by = outfitBySlot(data.defaultWorn.map(id => ({ id })), data.wardrobe);
         root.find('.npcb-wdx-grid').html(SLOTS.map((x) => {
             const n = data.wardrobe.filter(i => i.slots.includes(x.key)).length;
@@ -72,7 +76,7 @@ export function mountWardrobe(host, data, { key = '', onChange } = {}) {
         const open = st.expanded === it.id;
         return `<div class="npcb-wdx-row ${open ? 'exp' : ''} ${sel ? 'sel' : ''}" data-item="${esc(it.id)}">
             <input type="checkbox" class="npcb-wdx-pick" ${sel ? 'checked' : ''} title="Select">
-            <span class="npcb-wdx-star ${isStar(it.id) ? 'on' : ''}" title="Worn at the start">★</span>
+            ${startingOutfit ? `<span class="npcb-wdx-star ${isStar(it.id) ? 'on' : ''}" title="Worn at the start">★</span>` : ''}
             <span class="npcb-wdx-name">${esc(it.name)}</span>
             ${it.note ? `<i class="fa-solid fa-note-sticky npcb-dim" title="${esc(it.note)}"></i>` : ''}
             <span class="npcb-wdx-badges">${it.slots.map(k => `<span class="npcb-wdx-badge">${esc(SLOT_SHORT[k] || k)}</span>`).join('')}</span>
@@ -110,7 +114,7 @@ export function mountWardrobe(host, data, { key = '', onChange } = {}) {
         const n = st.selected.size;
         root.find('.npcb-wdx-bulk').toggle(n > 0).html(n ? `<b>${n} selected</b><span class="npcb-spacer"></span>
             <select class="text_pole npcb-wdx-bulkslot"><option value="">Set slot…</option>${SLOTS.map(x => `<option value="${x.key}">${esc(x.label)}</option>`).join('')}</select>
-            <div class="menu_button npcb-wdx-bulkstar">★ Starting</div>
+            ${startingOutfit ? '<div class="menu_button npcb-wdx-bulkstar">★ Starting</div>' : ''}
             <div class="menu_button redWarningBG npcb-wdx-bulkdel"><i class="fa-solid fa-trash-can"></i></div>
             <div class="menu_button npcb-wdx-bulkclear" title="Clear selection"><i class="fa-solid fa-xmark"></i></div>` : '');
         root.find('.npcb-wdx-newslot').text(`slot: ${st.slot ? SLOT_LABEL[st.slot] : 'auto'}`);
@@ -145,7 +149,7 @@ export function mountWardrobe(host, data, { key = '', onChange } = {}) {
     host.on('click.wdx', '.npcb-wdx-row', (e) => {
         if ($(e.target).is('.npcb-wdx-pick, .npcb-wdx-star')) return;
         const id = $(e.currentTarget).data('item');
-        if (st.slot && !$(e.target).is('.npcb-wdx-dots')) {
+        if (startingOutfit && st.slot && !$(e.target).is('.npcb-wdx-dots')) {
             setStar(id, !isStar(id));
             draw(); changed();
             return;

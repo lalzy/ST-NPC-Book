@@ -5,10 +5,11 @@ import { ctx, hasChat, meta } from '../core/context.js';
 import { lib, save, settings } from '../core/settings.js';
 import { clone, esc, sig } from '../core/utils.js';
 import { applyCastOverrides, extractCharacterList } from '../logic/castList.js';
+import { attachInstance, cloneScene, toScene } from '../logic/instances.js';
 import { resolveRef } from '../logic/matching.js';
 import { normalize } from '../logic/text.js';
 import { personaData, userBefore } from '../scene/persona.js';
-import { newInstance, snapOf } from '../scene/roster.js';
+import { instanceOpts, snapOf } from '../scene/roster.js';
 import { decorateAll } from '../speakers/decorate.js';
 import { renderRoster } from '../ui/roster/rosterBar.js';
 
@@ -22,7 +23,7 @@ export async function processGreetings() {
     const c = ctx();
     const chat = c.chat || [];
     let changed = false;
-    let carried = meta()?.base ?? [];
+    let carried = toScene(meta()?.base);
     const notes = { missing: new Set(), added: [], warnings: new Set(), errors: new Set() };
     for (let i = 0; i < chat.length; i++) {
         const msg = chat[i];
@@ -38,7 +39,7 @@ export async function processGreetings() {
             if (ex.cleaned === texts[k]) continue; // block could not be read and was left in place
             const preUser = userBefore(i);
             const cast = applyIntroCast(ex.entries, carried, preUser, notes);
-            const snap = { pre: clone(carried), post: clone(cast.roster), preUser: clone(preUser), postUser: clone(cast.user), raw: null, sig: sig(ex.cleaned), greeting: true };
+            const snap = { pre: clone(carried), post: clone(cast.scene), preUser: clone(preUser), postUser: clone(cast.user), raw: null, sig: sig(ex.cleaned), greeting: true };
             if (Array.isArray(msg.swipes) && msg.swipes.length) msg.swipes[k] = ex.cleaned;
             if (Array.isArray(msg.swipe_info)) {
                 msg.swipe_info[k] = msg.swipe_info[k] || {};
@@ -57,7 +58,7 @@ export async function processGreetings() {
             try { c.updateMessageBlock(i, msg); } catch (e) { /* not rendered yet */ }
         }
         const sn = snapOf(msg);
-        if (sn?.post) carried = sn.post;
+        if (sn?.post) carried = toScene(sn.post);
     }
     if (notes.missing.size) toastr.warning(`Not in the NPC Library: ${[...notes.missing].join(', ')}`, 'NPC Book');
     if (notes.errors.size) toastr.error(`Could not read the intro characters block: ${[...notes.errors].join('; ')}`, 'NPC Book');
@@ -66,7 +67,7 @@ export async function processGreetings() {
         toastr.warning([...notes.warnings].map(esc).join('<br>'), 'NPC Book: intro cast', { escapeHtml: false });
     }
     if (notes.added.length) {
-        save();
+        save(); // persona wardrobe additions live in settings; NPC additions are in the chat's instances
         toastr.info(`Added to wardrobe: ${notes.added.join('; ')}`, 'NPC Book');
     }
     if (changed) {
@@ -84,13 +85,13 @@ function isUserRef(ref) {
 
 /**
  * Build the scene for an intro message from its cast entries [{ref, overrides}].
- * Each NPC starts from its card (default outfit, first posture/state); overrides replace parts of that.
- * Clothing named in an override but missing from the wardrobe is added to the card's wardrobe.
+ * Each NPC is the chat's instance if it has one, else a new instance from its template; overrides replace parts of that.
+ * Clothing named in an override but missing from the wardrobe is added to the instance's wardrobe (never the template's).
  */
 function applyIntroCast(entries, carried, user, notes) {
     const s = settings();
     const opts = { postures: s.postures, states: s.states, conditions: s.conditions };
-    const roster = clone(carried);
+    const scene = cloneScene(carried);
     let u = clone(user);
     for (const e of entries || []) {
         if (isUserRef(e.ref)) {
@@ -102,15 +103,14 @@ function applyIntroCast(entries, carried, user, notes) {
             r.warnings.forEach(w => notes.warnings.add(`${ctx().name1}: ${w}`));
             continue;
         }
-        const id = resolveRef(e.ref, lib());
-        if (!id) { notes.missing.add(e.ref); continue; }
-        const t = lib()[id];
-        let inst = roster.find(x => x.id === id);
-        if (!inst) { inst = newInstance(id); roster.push(inst); }
-        const r = applyCastOverrides(inst, e.overrides, { ...opts, wardrobe: t.wardrobe || [] });
+        const id = resolveRef(e.ref, scene.instances) ?? resolveRef(e.ref, lib());
+        const inst = id ? attachInstance(scene, id, lib(), instanceOpts()) : null;
+        if (!inst) { notes.missing.add(e.ref); continue; }
+        const r = applyCastOverrides(inst, e.overrides, { ...opts, wardrobe: inst.wardrobe || [] });
         Object.assign(inst, r.instance);
-        if (r.added.length) { t.wardrobe = r.wardrobe; notes.added.push(`${t.name}: ${r.added.map(x => x.name).join(', ')}`); }
-        r.warnings.forEach(w => notes.warnings.add(`${t.name}: ${w}`));
+        inst.wardrobe = r.wardrobe;
+        if (r.added.length) notes.added.push(`${inst.name}: ${r.added.map(x => x.name).join(', ')}`);
+        r.warnings.forEach(w => notes.warnings.add(`${inst.name}: ${w}`));
     }
-    return { roster, user: u };
+    return { scene, user: u };
 }

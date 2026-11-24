@@ -1,19 +1,25 @@
 // Speaker card decoration in rendered messages (avatar, color) and the chat observer.
 
+import { hasChat } from '../core/context.js';
 import { lib, settings } from '../core/settings.js';
 import { initials } from '../core/utils.js';
 import { resolveRef } from '../logic/matching.js';
 import { normColor } from '../logic/text.js';
 import { ensurePortrait } from '../portraits/portraitQueue.js';
+import { findInstance } from '../scene/roster.js';
 
-/** Fill the avatar box of a speaker card (portrait, or initials when there is none) and set its accent color. */
+/**
+ * Fill the avatar box of a speaker card (portrait, or initials when there is none) and set its accent color.
+ * The speaker is this chat's instance; a library template is only shown for someone the chat has no instance of.
+ */
 function decorateTurn(turn) {
     const ava = turn.querySelector(':scope > [data-npcb-ava]');
     if (!ava) return;
     const raw = turn.getAttribute('data-npcb-turn') || '';
-    const id = resolveRef(raw, lib());
-    const t = id ? lib()[id] : null;
-    if (t && !t.portrait) ensurePortrait(id);
+    const inst = hasChat() ? findInstance(raw) : null;
+    const id = inst?.id ?? resolveRef(raw, lib());
+    const t = inst ?? (id ? lib()[id] : null);
+    if (inst && !inst.portrait) ensurePortrait(inst.id, { target: 'instance' });
     const key = `${id}|${t?.portrait || ''}|${t?.color || ''}|${t?.name || ''}`;
     if (ava.dataset.npcbKey === key) return;
     ava.dataset.npcbKey = key;

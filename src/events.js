@@ -4,6 +4,7 @@ import { ctx } from './core/context.js';
 import { runtime } from './core/runtime.js';
 import { updateAutoInjection } from './prompt/injection.js';
 import { renderPmStatus } from './prompt/promptManager.js';
+import { migrateChatScenes } from './scene/migrate.js';
 import { decorateAll } from './speakers/decorate.js';
 import { onGenerationStarted, processLastMessage } from './tracking/generation.js';
 import { processGreetings } from './tracking/greetings.js';
@@ -19,7 +20,7 @@ export function registerEventHandlers() {
     const finish = () => setTimeout(() => processLastMessage(), 0);
     eventSource.on(eventTypes.GENERATION_ENDED, finish);
     eventSource.on(eventTypes.GENERATION_STOPPED, finish);
-    eventSource.on(eventTypes.CHAT_CHANGED, () => { runtime.genCtx = null; closePopovers(); renderRoster(); renderLibraryList(); updateAutoInjection(); processGreetings(); setTimeout(decorateAll, 300); });
+    eventSource.on(eventTypes.CHAT_CHANGED, () => { runtime.genCtx = null; closePopovers(); migrateChatScenes(); renderRoster(); renderLibraryList(); updateAutoInjection(); processGreetings(); setTimeout(decorateAll, 300); });
     eventSource.on(eventTypes.MESSAGE_EDITED, (id) => { const m = ctx().chat?.[id]; if (m && !m.is_user && (ctx().chat.slice(0, id).every(x => !x.is_user))) processGreetings(); });
     eventSource.on(eventTypes.MORE_MESSAGES_LOADED, () => setTimeout(decorateAll, 100));
     for (const ev of [eventTypes.MESSAGE_SWIPED, eventTypes.MESSAGE_DELETED, eventTypes.MESSAGE_EDITED]) {

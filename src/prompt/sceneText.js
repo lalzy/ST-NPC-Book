@@ -2,7 +2,7 @@
 
 import { SLOT_LABEL } from '../constants.js';
 import { ctx, hasChat } from '../core/context.js';
-import { profileOf, templateFor } from '../core/npcs.js';
+import { profileOf } from '../core/npcs.js';
 import { extensions } from '../core/runtime.js';
 import { settings } from '../core/settings.js';
 import { indent, xa, xt } from '../core/utils.js';
@@ -91,9 +91,10 @@ function dialogueExamplesFor(t, inst) {
     return out;
 }
 
+/** One NPC's <char> block, built from the chat's instance only (it carries its own card fields, wardrobe and ext data). */
 function buildCharBlock(inst) {
     const s = settings();
-    const t = templateFor(inst);
+    const t = inst;
     const name = t?.name ?? inst.name ?? inst.id;
     const inner = [];
     const prof = profileOf(t);

@@ -8,7 +8,7 @@ export const ctx = () => SillyTavern.getContext();
 export function meta() {
     const m = ctx().chatMetadata;
     if (!m) return null;
-    if (!m[MODULE] || typeof m[MODULE] !== 'object') m[MODULE] = { base: [], pre: null };
+    if (!m[MODULE] || typeof m[MODULE] !== 'object') m[MODULE] = { base: { instances: {}, active: [] }, pre: null };
     return m[MODULE];
 }
 

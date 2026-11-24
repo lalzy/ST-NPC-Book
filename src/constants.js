@@ -172,7 +172,7 @@ export const DEFAULTS = {
     speakerReminder: DEFAULT_SPEAKER_REMINDER,
     trackOutfits: true,
     includeWardrobe: true,
-    allowWardrobeGrowth: false,
+    allowWardrobeGrowth: true,
     wardrobeDollCollapsed: false,
     folders: [],
     folderCollapsed: [],

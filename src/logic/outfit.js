@@ -59,12 +59,47 @@ export function wearItem(outfit, wardrobe, ref, condition) {
  * Apply an LLM outfit change {wear:[], remove:[], condition:{}} using ONLY items from the wardrobe.
  * Unknown items are ignored (and reported in `rejected`).
  */
+const NOTHING = /^(nothing|none|naked|nude)$/i;
+/** Example ids from the prompt that small models copy literally; never clothing. */
+const PLACEHOLDER = /^(item[_ -]?(id|name)s?|items?|ids?|names?|\.{2,}|…)$/i;
+
+/** An outfit-change reference as text: a string, or an object written as {"id": ...} / {"name": ...}. */
+function itemRef(r) { return r && typeof r === 'object' ? String(r.id ?? r.name ?? '') : r; }
+
+/** "blue_silk_dress" → "Blue silk dress"; a name that already reads as one is kept as written. */
+function nameFromRef(ref) {
+    const s = String(ref).trim();
+    if (/\s/.test(s) || !/[_-]/.test(s)) return s;
+    const words = s.replace(/[_-]+/g, ' ').trim();
+    return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * Clothing the character just got: items in "wear" (and an optional "add" list) that are not in the wardrobe yet.
+ * E.g. {"wear": ["blue_silk_dress"]} for a dress they were given. Returns raw items for buildWardrobe():
+ * the id the model used is kept, so its "wear" reference finds the new item. "nothing" and placeholder ids are skipped.
+ */
+export function newClothingIn(change, wardrobe) {
+    if (!change || typeof change !== 'object') return [];
+    const list = v => (Array.isArray(v) ? v : (v ? [v] : []));
+    const out = [];
+    const seen = new Set();
+    for (const raw of [...list(change.add), ...list(change.wear)]) {
+        const ref = String(itemRef(raw) ?? '').trim();
+        if (!ref || NOTHING.test(ref) || PLACEHOLDER.test(ref) || findItem(wardrobe, ref) || seen.has(normalize(ref))) continue;
+        seen.add(normalize(ref));
+        const obj = raw && typeof raw === 'object' ? raw : {};
+        out.push({ id: obj.id ?? (/\s/.test(ref) ? undefined : ref), name: obj.name ? String(obj.name) : nameFromRef(ref), slots: obj.slots ?? obj.slot, note: obj.note });
+    }
+    return out;
+}
+
 export function applyOutfitChange(outfit, wardrobe, change, conditions) {
     let cur = Array.isArray(outfit) ? outfit.map(x => ({ ...x })) : [];
     const rejected = [];
     if (!change || typeof change !== 'object') return { outfit: cur, rejected };
     const defCond = conditions?.[0] ?? 'Worn';
-    const list = v => (Array.isArray(v) ? v : (v ? [v] : []));
+    const list = v => (Array.isArray(v) ? v : (v ? [v] : [])).map(itemRef);
     for (const ref of list(change.remove)) {
         const item = findItem(wardrobe, ref);
         if (item) cur = cur.filter(w => w.id !== item.id);
@@ -72,6 +107,7 @@ export function applyOutfitChange(outfit, wardrobe, change, conditions) {
         else rejected.push(String(ref));
     }
     for (const ref of list(change.wear)) {
+        if (NOTHING.test(String(ref).trim())) { cur = []; continue; } // "wear": ["nothing"] = undress
         const r = wearItem(cur, wardrobe, ref, defCond);
         if (r.ok) cur = r.outfit; else rejected.push(String(ref));
     }

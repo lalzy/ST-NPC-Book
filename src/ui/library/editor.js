@@ -8,11 +8,10 @@ import { extensions } from '../../core/runtime.js';
 import { lib, save, settings } from '../../core/settings.js';
 import { clone, esc } from '../../core/utils.js';
 import { cropImageUrl, readFileAsDataUrl, uploadPortrait } from '../../images/imageTools.js';
-import { outfitFromDefault } from '../../logic/outfit.js';
 import { defaultPronouns } from '../../logic/profile.js';
 import { ID_PATTERN, uniqueId } from '../../logic/text.js';
 import { ensurePortrait } from '../../portraits/portraitQueue.js';
-import { addToScene, currentRoster, removeFromScene, writeCurrentRoster } from '../../scene/roster.js';
+import { addToScene, currentRoster, removeFromScene } from '../../scene/roster.js';
 import { renderAssist } from '../assist/assistPanel.js';
 import { resetAssistFor } from '../assist/assistState.js';
 import { avatarHtml } from '../avatar.js';
@@ -193,7 +192,7 @@ export function selectTemplate(id, isNew = false, tab = 'card') {
     });
     ed.on('click.npcb', '.npcb-ed-del', async () => {
         const c = ctx();
-        const ok = await c.callGenericPopup(`Delete NPC <b>${esc(t.name)}</b> (${esc(t.id)})? Scenes that contain it keep their entry but lose its details.`, c.POPUP_TYPE.CONFIRM);
+        const ok = await c.callGenericPopup(`Delete NPC <b>${esc(t.name)}</b> (${esc(t.id)})? Chats that already met this NPC keep their own copy of it.`, c.POPUP_TYPE.CONFIRM);
         if (!ok) return;
         delete lib()[t.id];
         save();
@@ -249,17 +248,7 @@ async function saveTemplateFromEditor(t, isNew) {
     registerFolder(lib()[id].folder);
     save();
     toastr.success(`Saved ${name}.`, 'NPC Book');
-    // Keep the live scene in sync with the card's wardrobe.
-    if (hasChat()) {
-        const t2 = lib()[id];
-        const roster = clone(currentRoster());
-        const inst = roster.find(i => i.id === id);
-        if (inst) {
-            let outfit = (inst.outfit || []).filter(w => t2.wardrobe.some(i => i.id === w.id));
-            if (!outfit.length) outfit = outfitFromDefault(t2.defaultWorn, t2.wardrobe, settings().conditions);
-            if (JSON.stringify(outfit) !== JSON.stringify(inst.outfit || [])) { inst.outfit = outfit; writeCurrentRoster(roster); }
-        }
-    }
+    // Templates are blueprints: chats that already have an instance of this NPC keep their own copy.
     selectTemplate(id, false, String(ed.find('.npcb-tab.active').data('tab') || 'card'));
     renderRoster();
 }

@@ -1,20 +1,22 @@
 // Portrait prompt building (template or LLM-written tag line).
 
-import { ctx, hasChat } from '../core/context.js';
+import { ctx } from '../core/context.js';
 import { profileOf, traitSummary } from '../core/npcs.js';
 import { settings } from '../core/settings.js';
 import { findItem, outfitFromDefault } from '../logic/outfit.js';
-import { currentRoster } from '../scene/roster.js';
 import { recentStory } from '../scene/story.js';
 
 export function cleanForImagine(x) {
     return String(x ?? '').replace(/[|{}"\n\r]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-/** Data about an NPC for portrait prompts: details, identity, what they wear right now, posture/state. */
+/**
+ * Data about an NPC for portrait prompts: details, identity, what they wear, posture/state.
+ * `t` is either a chat instance (its live outfit and state) or a library template (its starting outfit).
+ */
 function portraitData(t) {
     const s = settings();
-    const inst = hasChat() ? currentRoster().find(i => i.id === t.id) : null;
+    const inst = t.instanceOf ? t : null;
     const outfit = inst?.outfit ?? outfitFromDefault(t.defaultWorn, t.wardrobe || [], s.conditions);
     const wearing = (outfit || []).map(w => {
         const it = findItem(t.wardrobe || [], w.id);

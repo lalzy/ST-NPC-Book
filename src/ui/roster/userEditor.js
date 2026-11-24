@@ -6,7 +6,7 @@ import { extensions } from '../../core/runtime.js';
 import { settings } from '../../core/settings.js';
 import { clone, esc } from '../../core/utils.js';
 import { currentUser, personaData, personaKey } from '../../scene/persona.js';
-import { writeCurrentRoster } from '../../scene/roster.js';
+import { writeCurrentScene } from '../../scene/roster.js';
 import { avatarHtml } from '../avatar.js';
 import { openPersonaCharacter } from '../persona/personaCharacter.js';
 import { closePopovers, placePopover } from '../popover.js';
@@ -35,7 +35,7 @@ export function openUserEditor(anchor) {
     let draft = u.outfit;
     mountPaperdoll(pop.find('.npcb-doll-host'), () => draft, (o) => { draft = o; }, () => personaData().wardrobe, () => { closePopovers(); openPersonaCharacter('wardrobe'); });
     pop.on('click', '.npcb-u-save', () => {
-        writeCurrentRoster(null, { ...u, posture: String(pop.find('.npcb-u-posture').val() ?? ''), outfit: draft, dressed: true });
+        writeCurrentScene(null, { ...u, posture: String(pop.find('.npcb-u-posture').val() ?? ''), outfit: draft, dressed: true });
         closePopovers();
     });
     placePopover(pop, anchor);

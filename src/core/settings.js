@@ -21,6 +21,9 @@ export function settings() {
     if (JSON.stringify(s.traitKeys) === JSON.stringify(['age', 'gender', 'role'])) s.traitKeys = ['race', 'age', 'gender', 'role'];
     if (!s.portraitTemplateV2 && s.portraitLlmPrompt === DEFAULT_PORTRAIT_LLM_PROMPT_V1) s.portraitLlmPrompt = DEFAULT_PORTRAIT_LLM_PROMPT;
     s.portraitTemplateV2 = true;
+    // New clothing used to be ignored by default. Now that it only ever goes into a chat's own NPC instance, it is on;
+    // switched on once for existing installs, after which the checkbox is respected.
+    if (!s.wardrobeGrowthV2) { s.allowWardrobeGrowth = true; s.wardrobeGrowthV2 = true; }
     if (typeof s.instructions === 'string' && !s.instructions.includes('"sexual_experience"')) {
         s.instructions = s.instructions.replace(
             'plus "description" (one line) and "details" (full profile: appearance, personality, background, manner of speech).',

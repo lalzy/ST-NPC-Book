@@ -6,7 +6,7 @@ import { traitSummary } from '../../core/npcs.js';
 import { lib, save, settings } from '../../core/settings.js';
 import { esc } from '../../core/utils.js';
 import { normalize } from '../../logic/text.js';
-import { addToScene, currentRoster } from '../../scene/roster.js';
+import { addToScene, currentScene } from '../../scene/roster.js';
 import { avatarHtml } from '../avatar.js';
 import { renderLibraryList } from '../library/libraryList.js';
 import { openLibrary } from '../library/modal.js';
@@ -15,7 +15,8 @@ import { closePopovers, placePopover } from '../popover.js';
 export function openAddPicker(anchor) {
     closePopovers();
     if (!hasChat()) return;
-    const present = new Set(currentRoster().map(i => i.id));
+    const scene = currentScene();
+    const present = new Set(scene.active);
     const pop = $(`<div class="npcb-popover npcb-picker">
         <input type="search" class="text_pole npcb-picker-search" placeholder="Search NPCs…">
         <div class="npcb-picker-list"></div>
@@ -28,7 +29,10 @@ export function openAddPicker(anchor) {
     const draw = () => {
         const nq = normalize(pop.find('.npcb-picker-search').val());
         const byName = (a, b) => a.name.localeCompare(b.name);
-        const avail = Object.values(lib()).filter(t => !present.has(t.id));
+        // Same list as before (library NPCs not in the scene), but an NPC this chat has already met is shown as its
+        // instance; adding attaches that instance first, the template only when the chat has none.
+        const ids = [...new Set([...Object.keys(lib()), ...Object.keys(scene.instances)])].filter(id => !present.has(id));
+        const avail = ids.map(id => ({ ...(scene.instances[id] ?? lib()[id]), id, folder: lib()[id]?.folder ?? '' }));
         const list = pop.find('.npcb-picker-list');
         if (nq) {
             const hits = avail.filter(t => normalize(`${t.name} ${t.id} ${t.description} ${t.folder || ''}`).includes(nq)).sort(byName);

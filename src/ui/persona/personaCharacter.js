@@ -8,7 +8,7 @@ import { clone, esc } from '../../core/utils.js';
 import { outfitFromDefault } from '../../logic/outfit.js';
 import { updateAutoInjection } from '../../prompt/injection.js';
 import { currentUser, personaData, personaKey } from '../../scene/persona.js';
-import { writeCurrentRoster } from '../../scene/roster.js';
+import { writeCurrentScene } from '../../scene/roster.js';
 import { avatarHtml } from '../avatar.js';
 import { bindTabs } from '../tabs.js';
 import { mountWardrobe } from '../wardrobe/wardrobeEditor.js';
@@ -50,7 +50,7 @@ export async function openPersonaCharacter(tab = 'wardrobe') {
         const u = currentUser();
         let outfit = (u.outfit || []).filter(w => p.wardrobe.some(i => i.id === w.id));
         if (!outfit.length) outfit = outfitFromDefault(p.defaultWorn, p.wardrobe, settings().conditions);
-        writeCurrentRoster(null, { ...u, outfit, dressed: outfit.length > 0 });
+        writeCurrentScene(null, { ...u, outfit, dressed: outfit.length > 0 });
     }
     updateAutoInjection();
     toastr.success(`Saved ${c.name1}'s character.`, 'NPC Book');
