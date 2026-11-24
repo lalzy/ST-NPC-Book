@@ -24,10 +24,12 @@ export function uniqueId(base, taken) {
 export const ID_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 
 function toTrackerList(json) {
-    if (json && !Array.isArray(json)) {
-        if (Array.isArray(json.present)) return json.present;
-        if (Array.isArray(json.npcs)) return json.npcs;
-        if (typeof json === 'object') return [json];
+    if (json && typeof json === 'object' && !Array.isArray(json)) {
+        // A wrapper object ({"npcs": [...]}, {"characters": [...], "new": [...]}): use every list of entries in it.
+        const lists = Object.values(json).filter(v => Array.isArray(v) && v.length && v.every(x => x && typeof x === 'object' && !Array.isArray(x)));
+        if (lists.length && !('id' in json) && !('name' in json)) return lists.flat();
+        if (Object.values(json).some(v => Array.isArray(v) && !v.length) && !('id' in json) && !('name' in json)) return [];
+        return [json];
     }
     return json;
 }
@@ -69,11 +71,13 @@ export function salvageObjects(text) {
  */
 export function extractTracker(text) {
     const src = String(text ?? '');
-    const tagAt = src.search(/<npcs>/i);
-    const bare = /(^|\n)[ \t]*(?=\[\s*\{\s*"(?:id|name)"\s*:)/.exec(src);
+    const TAG = /<npcs\b[^>]*>/i;
+    const tagAt = src.search(TAG);
+    // A bare block: a line starting with [ or { whose first entry has an "id", "name" or "new" key.
+    const bare = /(^|\n)[ \t]*(?=[[{]\s*[[{]?\s*"(?:id|name|new|npcs|characters)"\s*:)/.exec(src);
     const bareAt = bare ? bare.index + bare[1].length : -1;
     const starts = [tagAt, bareAt].filter(x => x >= 0);
-    if (!starts.length) return { found: false, json: null, raw: '', cleaned: src, error: null };
+    if (!starts.length) return { found: false, json: null, raw: '', cleaned: src, error: null, truncated: false };
     const start = Math.min(...starts);
 
     // Every top-level array from the first attempt on (arrays inside entries, e.g. a wardrobe, are skipped).
@@ -84,33 +88,48 @@ export function extractTracker(text) {
     while ((m = re.exec(src)) !== null) {
         const close = matchBracket(src, m.index);
         const end = close < 0 ? src.length : close + 1;
-        arrays.push(src.slice(m.index, end));
+        arrays.push({ raw: src.slice(m.index, end), truncated: close < 0 });
         if (close < 0) break;
         re.lastIndex = end;
     }
 
     // One clean block followed by nothing tracker-like: remove just that block. Otherwise drop the whole tail.
-    const blocks = src.match(/<npcs>[\s\S]*?<\/npcs>/gi) || [];
-    const single = tagAt === start && blocks.length === 1 && arrays.length <= 1 && (src.match(/<npcs>/gi) || []).length === 1;
-    const cleaned = (single ? src.replace(/<npcs>[\s\S]*?<\/npcs>/i, '') : src.slice(0, start)).replace(/\n{3,}/g, '\n\n').trimEnd();
+    const blockRe = /<npcs\b[^>]*>[\s\S]*?<\/npcs>/gi;
+    const blocks = src.match(blockRe) || [];
+    const single = tagAt === start && blocks.length === 1 && arrays.length <= 1 && (src.match(/<npcs\b[^>]*>/gi) || []).length === 1;
+    const cleaned = (single ? src.replace(/<npcs\b[^>]*>[\s\S]*?<\/npcs>/i, '') : src.slice(0, start))
+        .replace(/\n?```[a-z]*\s*$/i, '') // a code fence the block was wrapped in
+        .replace(/\n{3,}/g, '\n\n').trimEnd();
+    const removed = single ? (src.match(/<npcs\b[^>]*>[\s\S]*?<\/npcs>/i)?.[0] ?? '') : src.slice(start);
 
-    let error = null;
-    for (let i = arrays.length - 1; i >= 0; i--) {
+    const tryParse = (raw, truncated, rescue = true) => {
         try {
-            const json = toTrackerList(parseLenientJson(arrays[i]));
-            if (Array.isArray(json)) return { found: true, json, raw: arrays[i], cleaned, error: null };
-        } catch (e) { error = error ?? (e?.message || String(e)); }
-        const rescued = salvageObjects(arrays[i]);
-        if (rescued.length) return { found: true, json: rescued, raw: arrays[i], cleaned, error: null };
+            const json = toTrackerList(parseLenientJson(raw));
+            if (Array.isArray(json)) return { found: true, json, raw, cleaned, removed, error: null, truncated };
+        } catch { /* fall through to rescue */ }
+        if (!rescue) return null;
+        const rescued = salvageObjects(raw).flatMap(o => toTrackerList(o));
+        return rescued.length ? { found: true, json: rescued, raw, cleaned, removed, error: null, truncated } : null;
+    };
+    // 1) A complete, valid <npcs> block (last one first); this also reads wrapper objects with several lists.
+    const closed = [...src.matchAll(/<npcs\b[^>]*>([\s\S]*?)<\/npcs>/gi)].map(x => x[1]).reverse();
+    for (const body of closed) {
+        if (/<npcs\b/i.test(body)) continue;
+        const hit = tryParse(body, false, false);
+        if (hit) return hit;
     }
-    // No array at all, e.g. <npcs>{"id": "a"}</npcs> or <npcs>{"npcs": …}</npcs>.
-    const bodies = [...src.matchAll(/<npcs>([\s\S]*?)(?:<\/npcs>|(?=<npcs>)|$)/gi)].map(x => x[1]).reverse();
-    for (const body of bodies) {
-        try { const json = toTrackerList(parseLenientJson(body)); if (Array.isArray(json)) return { found: true, json, raw: body, cleaned, error: null }; } catch (e) { error = error ?? (e?.message || String(e)); }
-        const rescued = salvageObjects(body);
-        if (rescued.length) return { found: true, json: rescued, raw: body, cleaned, error: null };
+    // 2) The last array that yields entries, rescuing intact entries from a broken or cut-off one.
+    for (let i = arrays.length - 1; i >= 0; i--) {
+        const hit = tryParse(arrays[i].raw, arrays[i].truncated);
+        if (hit) return hit;
     }
-    return { found: true, json: null, raw: src.slice(start), cleaned, error };
+    // 3) No usable array: a single object, a wrapper object, or tag content.
+    const bodies = [...src.matchAll(/<npcs\b[^>]*>([\s\S]*?)(?:<\/npcs>|(?=<npcs\b)|$)/gi)].map(x => x[1]).reverse();
+    for (const body of [...bodies, src.slice(start)]) {
+        const hit = tryParse(body, !/<\/npcs>/i.test(src.slice(start)) && matchBracket(body, body.search(/[[{]/)) < 0);
+        if (hit) return hit;
+    }
+    return { found: true, json: null, raw: src.slice(start), cleaned, removed, error: 'no readable entries', truncated: matchBracket(src, src.slice(start).search(/[[{]/) + start) < 0 };
 }
 
 export function parseLenientJson(raw) {
@@ -316,12 +335,13 @@ function isLeaving(entry) {
  * Characters that are not mentioned stay exactly as they were.
  * Returns { roster, created: [template], updated: [template], log: [] }.
  */
-export function applyTracker(list, prevRoster, { library, threshold, numericTolerance, postures, states, conditions = ['Worn'], allowWardrobeGrowth = false, autoCreate = true, traitKeys = [], excludeNames = [] }) {
+export function applyTracker(list, prevRoster, { library, threshold, numericTolerance, postures, states, conditions = ['Worn'], allowWardrobeGrowth = false, autoCreate = true, traitKeys = [], excludeNames = [], maxNew = 0 }) {
     const prev = Array.isArray(prevRoster) ? prevRoster : [];
     const presentIds = prev.map(i => i.id);
     const lib = { ...(library || {}) };
     const created = [];
     const updated = [];
+    const skipped = [];
     const log = [];
     const roster = prev.map(i => ({ ...i, outfit: (i.outfit || []).map(w => ({ ...w })) }));
     const excluded = new Set(excludeNames.map(normalize).filter(Boolean));
@@ -341,6 +361,7 @@ export function applyTracker(list, prevRoster, { library, threshold, numericTole
         }
         if (!id) {
             if (!autoCreate) { log.push({ name: nm, action: 'skipped', reason }); continue; }
+            if (maxNew > 0 && created.length >= maxNew) { skipped.push(nm || entry.id); log.push({ name: nm, action: 'skipped-limit' }); continue; }
             const newId = uniqueId(entry.id || nm, x => !!lib[x]);
             const traits = {};
             for (const k of traitKeys) traits[k] = '';
@@ -394,7 +415,7 @@ export function applyTracker(list, prevRoster, { library, threshold, numericTole
         const feelings = entry.feelings ?? entry.thoughts;
         if (feelings !== undefined && feelings !== null && String(feelings).trim()) inst.feelings = String(feelings).trim();
     }
-    return { roster, created, updated: updated.filter(u => !created.some(c => c.id === u.id)), log };
+    return { roster, created, skipped, updated: updated.filter(u => !created.some(c => c.id === u.id)), log };
 }
 
 // ───────────────────────── wardrobe / paperdoll ─────────────────────────

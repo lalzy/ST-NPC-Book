@@ -24,6 +24,7 @@ Write your reply as usual. Then, at the very end, add one <npcs> block that reco
 Put in the block:
 - A character already in the scene whose posture, state, feelings or clothing changed in your reply: their "id" and only the fields that changed. Compare with the scene: if a character's mood in your reply no longer matches their listed state (listed Calm, but your reply shows cold anger), that is a change, so give the new state.
 - A character who arrived: their "id" from Known NPCs, plus "posture" and "state". Someone not in Known NPCs (or a different person who shares a name) gets "name" and "new": true, plus "traits" with [[TRAIT_KEYS]] and the profile fields shown in the example.
+- Only track characters who matter: someone with a name, or someone [[USER]] actually talks to or deals with (the innkeeper, a shopkeeper, one gate guard). Never add groups, crowds or background people (guards, patrons, townsfolk); they stay in the story text only. At most [[MAX_NEW]] new characters per reply.
 - A character who left: {"id": "...", "left": true}.
 - Report only what your reply actually shows. Leave out everyone and everything that did not change. If nothing changed, write <npcs>[]</npcs>.
 - Never list [[EXCLUDE]].
@@ -196,6 +197,7 @@ const DEFAULTS = {
     folders: [],
     folderCollapsed: [],
     autoFolder: '',
+    maxNewPerReply: 2,
     assistCardPrompt: DEFAULT_ASSIST_CARD_PROMPT,
     assistWardrobePrompt: DEFAULT_ASSIST_WARDROBE_PROMPT,
     outfitRules: DEFAULT_OUTFIT_RULES,
@@ -572,6 +574,7 @@ function buildInstructionText() {
         .replaceAll('[[SPEAKER_RULE]]', s.enabled && s.speakerPortraits ? s.speakerRule : '')
         .replaceAll('[[OUTFIT_RULES]]', [s.trackOutfits ? s.outfitRules : '', s.trackUser ? DEFAULT_USER_RULE : '', ...extInstructions()].filter(Boolean).join('\n'))
         .replaceAll('[[USER_EXAMPLE]]', s.trackUser ? `,\n  {"id": "user", "posture": "${s.postures[1] ?? s.postures[0] ?? 'Sitting'}"}` : '')
+        .replaceAll('[[MAX_NEW]]', String(Number(s.maxNewPerReply) > 0 ? Number(s.maxNewPerReply) : 2))
         .replaceAll('[[CONDITIONS]]', s.conditions.join(', '))
         .replaceAll('[[SLOTS]]', SLOTS.map(x => x.key).join(', '))
         .replaceAll('[[EXCLUDE]]', excludedNames().join(' and ') || 'the user')
@@ -779,6 +782,7 @@ async function processLastMessage() {
         const preUser = adaptUser(g.preUser ?? userBefore(idx));
         let post = (g.type === 'continue' && existing?.post) ? existing.post : pre;
         let postUser = (g.type === 'continue' && existing?.postUser) ? adaptUser(existing.postUser) : preUser;
+        let trackLog = [];
         if (ex.found) {
             msg.mes = ex.cleaned;
             if (Array.isArray(msg.swipes) && msg.swipe_id !== undefined) msg.swipes[msg.swipe_id] = ex.cleaned;
@@ -807,6 +811,7 @@ async function processLastMessage() {
                     conditions: s.conditions,
                     allowWardrobeGrowth: s.allowWardrobeGrowth,
                     autoCreate: s.autoCreate,
+                    maxNew: Number(s.maxNewPerReply) || 0,
                     traitKeys: s.traitKeys,
                     excludeNames,
                 });
@@ -823,18 +828,30 @@ async function processLastMessage() {
                 }
                 for (const t of r.updated || []) lib()[t.id] = t;
                 if (r.updated?.length) save();
+                if (r.skipped?.length) {
+                    toastr.warning(`Skipped ${r.skipped.length} more new character${r.skipped.length > 1 ? 's' : ''} (limit ${s.maxNewPerReply} per reply): ${r.skipped.join(', ')}`, 'NPC Book');
+                }
+                if (ex.truncated) {
+                    toastr.warning(`The <npcs> block was cut off before it ended (reply longer than the response length?). Used the ${ex.json.length} complete entr${ex.json.length === 1 ? 'y' : 'ies'}. Click to see it.`, 'NPC Book', { timeOut: 8000, onclick: () => showTrackerBlock(idx) });
+                }
                 if (r.created.length) {
                     save();
                     toastr.info(`New NPC${r.created.length > 1 ? 's' : ''}: ${r.created.map(t => `${t.name} (${t.id})`).join(', ')}`, 'NPC Book');
                     renderLibraryList();
                 }
                 post = r.roster;
+                trackLog = r.log.map(l => `${l.action}: ${l.name ?? l.id ?? ''}${l.id && l.name && l.id !== l.name ? ` (${l.id})` : ''}${l.items ? ` [${l.items.join(', ')}]` : ''}`);
             } else {
                 console.warn('[NPC Book] could not parse tracker block:', ex.error, ex.raw);
-                toastr.warning('Could not parse the <npcs> block; scene left unchanged.', 'NPC Book');
+                toastr.warning(ex.truncated
+                    ? 'The <npcs> block was cut off before its first complete entry (reply longer than the response length?); scene left unchanged. Click to see it.'
+                    : 'Could not parse the <npcs> block; scene left unchanged. Click to see what the model wrote.', 'NPC Book', { timeOut: 8000, onclick: () => showTrackerBlock(idx) });
             }
         }
-        const snap = { pre: clone(pre), post: clone(post), preUser: clone(preUser), postUser: clone(postUser), raw: ex.found ? ex.raw : (existing?.raw ?? null), sig: sig(msg.mes) };
+        const block = ex.found
+            ? { text: ex.removed, status: !ex.json ? 'unreadable' : ex.truncated ? 'cut off' : 'ok', entries: ex.json?.length ?? 0, log: trackLog }
+            : (existing?.block ?? null);
+        const snap = { pre: clone(pre), post: clone(post), preUser: clone(preUser), postUser: clone(postUser), raw: ex.found ? ex.raw : (existing?.raw ?? null), block, sig: sig(msg.mes) };
         msg.extra = msg.extra || {};
         msg.extra[MODULE] = snap;
         if (Array.isArray(msg.swipe_info) && msg.swipe_id !== undefined) {
@@ -857,6 +874,23 @@ async function processLastMessage() {
     }
     // Tell sister extensions (e.g. TTS) that this message is final: tracker block removed, scene saved.
     if (processed) document.dispatchEvent(new CustomEvent('npcbook:message', { detail: processed }));
+}
+
+/** Show the <npcs> block that was removed from a message (default: the latest one that had a block). */
+async function showTrackerBlock(idx) {
+    const c = ctx();
+    const chat = c.chat || [];
+    if (idx === undefined) {
+        for (let i = chat.length - 1; i >= 0; i--) if (snapOf(chat[i])?.block) { idx = i; break; }
+    }
+    const b = idx === undefined ? null : snapOf(chat[idx])?.block;
+    if (!b) { toastr.info('No NPC block in this chat yet (or it was written before this version).', 'NPC Book'); return; }
+    const html = `<div class="npcb-blockview">
+        <div><b>Message #${idx}</b> · ${esc(b.status === 'ok' ? `read ${b.entries} entr${b.entries === 1 ? 'y' : 'ies'}` : b.status === 'cut off' ? `cut off, used ${b.entries} complete entr${b.entries === 1 ? 'y' : 'ies'}` : 'could not be read')}</div>
+        ${b.log?.length ? `<div class="npcb-small">${b.log.map(esc).join('<br>')}</div>` : ''}
+        <pre class="npcb-pre">${esc(b.text || '(empty)')}</pre>
+    </div>`;
+    await c.callGenericPopup(html, c.POPUP_TYPE.TEXT, '', { wide: true, large: true, allowVerticalScrolling: true });
 }
 
 // ───────────────────────── first message: starting cast ─────────────────────────
@@ -1247,12 +1281,14 @@ function ensureRosterBar() {
                 <span class="npcb-roster-title">In scene</span>
                 <span class="npcb-roster-count"></span>
                 <span class="npcb-roster-add fa-solid fa-user-plus" title="Add NPC to scene"></span>
+                <span class="npcb-roster-block fa-solid fa-code" title="Show the last NPC block the AI wrote"></span>
             </div>
             <div class="npcb-roster-body"><div class="npcb-user-slot"></div><div class="npcb-roster-cards"></div></div>
         </div>`);
     $('#send_form').before(bar);
     bar.on('click', '.npcb-roster-toggle', () => { settings().rosterCollapsed = !settings().rosterCollapsed; save(); renderRoster(); });
     bar.on('click', '.npcb-roster-add', (e) => { e.stopPropagation(); openAddPicker(e.currentTarget); });
+    bar.on('click', '.npcb-roster-block', (e) => { e.stopPropagation(); showTrackerBlock(); });
     bar.on('click', '.npcb-roster-cards .npcb-card', (e) => { e.stopPropagation(); openInstanceEditor($(e.currentTarget).data('id'), e.currentTarget); });
     bar.on('click', '.npcb-user-card', (e) => { e.stopPropagation(); openUserEditor(e.currentTarget); });
 }
@@ -2941,6 +2977,7 @@ async function mountSettings() {
     bind('#npcb_include_lib', 'includeLibrary', 'checkbox');
     bind('#npcb_autocreate', 'autoCreate', 'checkbox');
     bind('#npcb_autofolder', 'autoFolder');
+    bind('#npcb_maxnew', 'maxNewPerReply', 'number');
     bind('#npcb_trackchar', 'trackChar', 'checkbox');
     bind('#npcb_trackuser', 'trackUser', 'checkbox');
     bind('#npcb_personainuser', 'personaInUser', 'checkbox');

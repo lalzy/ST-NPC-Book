@@ -250,3 +250,7 @@
 .npcb-dx-value { flex: 1; min-width: 0; width: auto; }
 .npcb-dx .menu_button { margin: 0; }
 .npcb-dx-add { width: fit-content; }
+
+/* last tracker block viewer */
+.npcb-roster-head .npcb-roster-block { opacity: .6; }
+.npcb-blockview { text-align: left; display: flex; flex-direction: column; gap: 6px; }
