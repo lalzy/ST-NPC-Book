@@ -6,9 +6,11 @@ import { esc } from '../../core/utils.js';
 import { normalize } from '../../logic/text.js';
 import { closePopovers, placePopover } from '../popover.js';
 
-export function openPortraitMenu(anchor, actions) {
-    closePopovers();
+/** keepOpen: leave other popovers open (e.g. the roster instance popover the menu was opened from). */
+export function openPortraitMenu(anchor, actions, { keepOpen = false } = {}) {
+    if (keepOpen) $('.npcb-popover.npcb-menu').remove(); else closePopovers();
     const items = [
+        ['view', 'fa-expand', 'View full size'],
         ['local', 'fa-upload', 'From this device'],
         ['server', 'fa-server', 'From the server (ST images)'],
         ['crop', 'fa-crop-simple', 'Crop current'],
@@ -17,7 +19,7 @@ export function openPortraitMenu(anchor, actions) {
     ].filter(([k]) => actions[k]);
     const pop = $(`<div class="npcb-popover npcb-menu">${items.map(([k, icon, label]) => `<div class="npcb-menu-item" data-act="${k}"><i class="fa-solid ${icon}"></i> ${label}</div>`).join('')}</div>`);
     pop.on('click', e => e.stopPropagation());
-    pop.on('click', '.npcb-menu-item', (e) => { const k = $(e.currentTarget).data('act'); closePopovers(); actions[k]?.(); });
+    pop.on('click', '.npcb-menu-item', (e) => { const k = $(e.currentTarget).data('act'); if (keepOpen) pop.remove(); else closePopovers(); actions[k]?.(); });
     placePopover(pop, anchor);
 }
 

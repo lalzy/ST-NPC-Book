@@ -7,6 +7,7 @@ import { lib, save, settings } from '../core/settings.js';
 import { currentScene, patchInstanceEverywhere } from '../scene/roster.js';
 import { decorateAll } from '../speakers/decorate.js';
 import { avatarHtml } from '../ui/avatar.js';
+import { refreshInstancePopoverHead } from '../ui/instancePortrait.js';
 import { renderLibraryList } from '../ui/library/libraryList.js';
 import { libState } from '../ui/library/state.js';
 import { renderRoster } from '../ui/roster/rosterBar.js';
@@ -53,6 +54,7 @@ function storePortrait(job, url) {
         patchInstanceEverywhere(id, { portrait: url });
         renderRoster();
         decorateAll();
+        refreshInstancePopoverHead(id, url);
         return;
     }
     if (!lib()[id]) return;

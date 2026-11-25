@@ -21,7 +21,7 @@ function freshUser(prev) {
     const s = settings();
     const p = personaData();
     const outfit = startingOutfit(p, s.conditions);
-    return { persona: personaKey(), posture: prev?.posture ?? s.postures[0] ?? '', outfit, dressed: outfit.length > 0 };
+    return { persona: personaKey(), posture: prev?.posture ?? s.postures[0] ?? '', outfit, dressed: outfit.length > 0, absent: !!prev?.absent };
 }
 /**
  * Make a stored user state usable for the current persona.
@@ -52,6 +52,12 @@ export function userBefore(idx) {
     }
     return adaptUser(meta()?.baseUser);
 }
+/** Whether the user (persona) is in the scene. Stored per chat message with the rest of the user state, so it rolls back with swipes. */
+export function userInScene(u = currentUser()) { return !u?.absent; }
+
+/** Put the user in the scene or take them out. Posture and outfit are kept. */
+export function setUserInScene(inScene) { return { ...currentUser(), absent: !inScene }; }
+
 export function promptUser() {
     if (runtime.genCtx?.preUser && runtime.genCtx.idx === undefined) return adaptUser(runtime.genCtx.preUser);
     return currentUser();

@@ -7,7 +7,7 @@ import { extensions } from '../../core/runtime.js';
 import { settings } from '../../core/settings.js';
 import { clone, esc } from '../../core/utils.js';
 import { resolveOutfit } from '../../logic/outfit.js';
-import { currentUser, personaData, personaKey } from '../../scene/persona.js';
+import { currentUser, personaData, personaKey, setUserInScene } from '../../scene/persona.js';
 import { writeCurrentScene } from '../../scene/roster.js';
 import { avatarHtml } from '../avatar.js';
 import { openPersonaCharacter } from '../persona/personaCharacter.js';
@@ -26,7 +26,8 @@ export function openUserEditor(anchor) {
     };
     const ava = personaKey() ? `<img class="npcb-ava npcb-ava-md" src="${esc(getUserAvatar(personaKey()))}">` : avatarHtml(null, c.name1, 'npcb-ava-md');
     const pop = $(`<div class="npcb-popover npcb-inst">
-        <div class="npcb-inst-head">${ava}<div><b>${esc(c.name1)}</b><br><small class="npcb-dim">you · persona</small></div></div>
+        <div class="npcb-inst-head"><div class="npcb-u-ava">${ava}</div><div><b>${esc(c.name1)}</b><br><small class="npcb-dim npcb-u-where"></small></div></div>
+        <div class="menu_button npcb-u-scene" style="width:auto; white-space:nowrap;"></div>
         <label>Current posture<select class="text_pole npcb-u-posture">${opts(s.postures, u.posture)}</select></label>
         <div class="npcb-doll-host"></div>
         <div class="npcb-row"><div class="menu_button npcb-u-save"><i class="fa-solid fa-check"></i> Save</div>
@@ -34,6 +35,21 @@ export function openUserEditor(anchor) {
     </div>`);
     pop.on('click', '.npcb-u-ext', (e) => { const id = $(e.currentTarget).data('ext'); closePopovers(); openPersonaCharacter(`ext:${id}`); });
     pop.on('click', e => e.stopPropagation());
+    const showWhere = () => {
+        const inScene = !u.absent;
+        pop.find('.npcb-u-where').text(`you · persona · ${inScene ? 'in-scene' : 'not-in-scene'}`);
+        pop.find('.npcb-u-ava').attr('style', inScene ? '' : 'opacity:.35 !important; filter:grayscale(1) !important;');
+        pop.find('.npcb-u-scene').html(inScene
+            ? '<i class="fa-solid fa-door-open"></i> Leave the scene'
+            : '<i class="fa-solid fa-right-to-bracket"></i> Place yourself in the scene');
+    };
+    showWhere();
+    // Takes effect at once (no Save needed); posture and outfit edits in this popover still wait for Save.
+    pop.on('click', '.npcb-u-scene', () => {
+        u.absent = !u.absent;
+        writeCurrentScene(null, setUserInScene(!u.absent));
+        showWhere();
+    });
     let draft = resolveOutfit(u.outfit, personaData().wardrobe || []);
     mountPaperdoll(pop.find('.npcb-doll-host'), () => draft, (o) => { draft = o; }, () => {
         const p = personaData();

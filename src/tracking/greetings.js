@@ -75,6 +75,17 @@ export async function processGreetings() {
     }
 }
 
+const IN_SCENE_KEYS = ['in_scene', 'inscene', 'present'];
+
+/** true / false from a JSON value (booleans, "yes"/"no", "in"/"out", 1/0), else null. */
+function parseBool(v) {
+    if (typeof v === 'boolean') return v;
+    const n = String(v ?? '').trim().toLowerCase();
+    if (['true', 'yes', 'in', 'in_scene', 'in-scene', '1', 'present'].includes(n)) return true;
+    if (['false', 'no', 'out', 'not_in_scene', 'not-in-scene', '0', 'absent'].includes(n)) return false;
+    return null;
+}
+
 function isUserRef(ref) {
     const n = normalize(ref);
     const name1 = normalize(ctx().name1);
@@ -100,6 +111,14 @@ function applyIntroCast(entries, carried, user, notes) {
         const { id: ref, ...rest } = full;
         const e = { ref: String(ref ?? raw.ref), overrides: Object.fromEntries(Object.entries(rest).filter(([k]) => !claimed.has(k.toLowerCase()))) };
         if (isUserRef(e.ref)) {
+            // "in_scene": false starts the scene without the user (also "in-scene", "inScene", "present"). Leave it out to keep them in.
+            const sceneKey = Object.keys(e.overrides).find(k => IN_SCENE_KEYS.includes(k.toLowerCase().replace(/[-\s]/g, '_')));
+            if (sceneKey !== undefined) {
+                const v = parseBool(e.overrides[sceneKey]);
+                if (v === null) notes.warnings.add(`${ctx().name1}: "${sceneKey}" should be true or false`);
+                else u = { ...u, absent: !v };
+                delete e.overrides[sceneKey];
+            }
             const p = personaData();
             const worn = resolveOutfit(u.outfit, p.wardrobe || []);
             const cat = outfitCatalog({ source: 'greeting', kind: 'user', id: 'user', subject: p, ext: { ...(p.ext || {}), ...(u.ext || {}) } });

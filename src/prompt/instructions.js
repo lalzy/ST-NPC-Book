@@ -8,6 +8,7 @@ import { lib, settings } from '../core/settings.js';
 import { resolveRef } from '../logic/matching.js';
 import { SLOTS } from '../logic/slots.js';
 import { normalize } from '../logic/text.js';
+import { promptUser, userInScene } from '../scene/persona.js';
 import { promptScene } from '../scene/roster.js';
 
 function extInstructions() {
@@ -27,12 +28,13 @@ export function buildInstructionText() {
     // the LLM brings in whoever it needs and the tracker matches the name (see findLookups). Details of an NPC are sent
     // only through {{npcScene}}, while that NPC is in the scene.
     const scene = promptScene();
+    const trackUser = s.trackUser && userInScene(promptUser());
     const byName = (a, b) => String(a.name).localeCompare(String(b.name));
     const libLines = Object.values(scene.instances).sort(byName).map(t => `${t.id}: ${t.name}`);
     const text = String(s.instructions || '')
         .replaceAll('[[SPEAKER_RULE]]', s.enabled && s.speakerPortraits ? s.speakerRule : '')
-        .replaceAll('[[OUTFIT_RULES]]', [s.trackOutfits ? s.outfitRules : '', s.trackUser ? DEFAULT_USER_RULE : '', ...extInstructions()].filter(Boolean).join('\n'))
-        .replaceAll('[[USER_EXAMPLE]]', s.trackUser ? `,\n  {"id": "user", "posture": "${s.postures[1] ?? s.postures[0] ?? 'Sitting'}"}` : '')
+        .replaceAll('[[OUTFIT_RULES]]', [s.trackOutfits ? s.outfitRules : '', trackUser ? DEFAULT_USER_RULE : '', ...extInstructions()].filter(Boolean).join('\n'))
+        .replaceAll('[[USER_EXAMPLE]]', trackUser ? `,\n  {"id": "user", "posture": "${s.postures[1] ?? s.postures[0] ?? 'Sitting'}"}` : '')
         .replaceAll('[[MAX_NEW]]', String(Number(s.maxNewPerReply) > 0 ? Number(s.maxNewPerReply) : 2))
         .replaceAll('[[CONDITIONS]]', s.conditions.join(', '))
         .replaceAll('[[SLOTS]]', SLOTS.map(x => x.key).join(', '))

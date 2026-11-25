@@ -226,3 +226,20 @@
 .npcb-match-side small { opacity: .7; }
 .npcb-match-tag { font-weight: bold; white-space: nowrap; }
 .npcb-match-tag-new { color: var(--SmartThemeQuoteColor, #6a6); }
+
+/* scene bar: user out of the scene (also set inline, so SillyTavern styles can't override it) */
+.npcb-user-card.npcb-user-out .npcb-user-ava { opacity: .35 !important; filter: grayscale(1) !important; }
+.npcb-user-scene:hover { opacity: 1 !important; }
+
+/* In-chat speaker card: clickable portrait (instance portrait menu) and the full-size viewer. */
+#chat .mes_text div[data-npcb-turn] > [data-npcb-ava] { cursor: pointer !important; pointer-events: auto !important; transition: filter .15s ease, box-shadow .15s ease; }
+#chat .mes_text div[data-npcb-turn] > [data-npcb-ava]:hover { filter: brightness(1.15); box-shadow: 0 0 0 2px var(--npcb-c, var(--SmartThemeQuoteColor, #888)) !important; }
+body > .npcb-popover.npcb-menu { position: fixed !important; z-index: 10050 !important; display: flex !important; flex-direction: column !important; }
+.npcb-pview { display: flex !important; align-items: center !important; justify-content: center !important; width: 100% !important; max-height: 80vh !important; overflow: auto !important; padding: 0 !important; margin: 0 !important; background: none !important; }
+.npcb-pview img.npcb-pview-img { display: block !important; max-width: 100% !important; max-height: 78vh !important; width: auto !important; height: auto !important; object-fit: contain !important; border-radius: 8px !important; margin: 0 auto !important; }
+.npcb-popover.npcb-inst .npcb-inst-head .npcb-ava { cursor: pointer !important; pointer-events: auto !important; transition: filter .15s ease, box-shadow .15s ease; }
+.npcb-popover.npcb-inst .npcb-inst-head .npcb-ava:hover { filter: brightness(1.15); box-shadow: 0 0 0 2px var(--SmartThemeQuoteColor, #888) !important; }
+/* Expanded (zoomed) in-chat portrait: follows ST's .zoomed_avatar look; these keep it visible on any theme. */
+body > .zoomed_avatar.npcb-zoom { display: flex !important; flex-direction: column !important; position: fixed !important; z-index: 9999 !important; max-height: 90vh !important; max-width: 90vw !important; }
+body > .zoomed_avatar.npcb-zoom .zoomed_avatar_img { display: block !important; max-width: 100% !important; max-height: calc(90vh - 40px) !important; width: auto !important; height: auto !important; object-fit: contain !important; }
+body > .zoomed_avatar.npcb-zoom .dragClose { cursor: pointer !important; }

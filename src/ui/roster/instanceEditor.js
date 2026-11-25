@@ -8,6 +8,7 @@ import { cloneScene } from '../../logic/instances.js';
 import { resolveOutfit } from '../../logic/outfit.js';
 import { currentScene, removeFromScene, writeCurrentScene } from '../../scene/roster.js';
 import { avatarHtml } from '../avatar.js';
+import { openInstancePortraitMenuFor } from '../instancePortrait.js';
 import { openLibrary } from '../library/modal.js';
 import { closePopovers, placePopover } from '../popover.js';
 import { bindTabs } from '../tabs.js';
@@ -32,7 +33,7 @@ export function openInstanceEditor(id, anchor) {
     const chatTabOf = (x) => (x.chatTab === true ? {} : x.chatTab);
     const draftExt = {};
     for (const x of extTabs) draftExt[x.id] = clone(inst.ext?.[x.id] ?? (typeof x.defaultData === 'function' ? x.defaultData() : {}));
-    const pop = $(`<div class="npcb-popover npcb-inst">
+    const pop = $(`<div class="npcb-popover npcb-inst" data-npcb-inst="${esc(id)}">
         <div class="npcb-inst-head">${avatarHtml(t, name, 'npcb-ava-md')}
             <div><b>${esc(name)}</b><br><small class="npcb-dim">${esc(id)}</small></div>
         </div>
@@ -52,6 +53,13 @@ export function openInstanceEditor(id, anchor) {
         <div class="npcb-row">${[...extensions.values()].filter(x => x.cardTab && !x.chatTab).map(x => `<div class="menu_button npcb-i-ext" data-ext="${esc(x.id)}"><i class="fa-solid ${esc(x.personaSheet?.icon || x.cardTab.icon || 'fa-table-list')}"></i> ${esc(x.sheetLabel || `${x.cardTab.label || x.id} sheet`)}</div>`).join('')}</div>
     </div>`);
     pop.on('click', e => e.stopPropagation());
+    // Click the portrait: view / replace / crop / regenerate / remove this instance's portrait.
+    pop.find('.npcb-inst-head .npcb-ava').attr('title', 'Click to change portrait').addClass('npcb-ava-click');
+    pop.on('click', '.npcb-inst-head .npcb-ava', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openInstancePortraitMenuFor(id, e.currentTarget); // the menu opens beside it; this popover stays open
+    });
     const outfit0 = resolveOutfit(inst.outfit, inst.wardrobe || []);
     let draftOutfit = clone(outfit0);
     // Known clothing from sister extensions (e.g. a wardrobe). Its "Edit" action opens their sheet, so close this first.

@@ -9,8 +9,8 @@ import { save, settings } from '../../core/settings.js';
 import { esc } from '../../core/utils.js';
 import { ensurePortrait } from '../../portraits/portraitQueue.js';
 import { updateAutoInjection } from '../../prompt/injection.js';
-import { currentUser, personaKey } from '../../scene/persona.js';
-import { currentRoster } from '../../scene/roster.js';
+import { currentUser, personaKey, setUserInScene, userInScene } from '../../scene/persona.js';
+import { currentRoster, writeCurrentScene } from '../../scene/roster.js';
 import { avatarHtml } from '../avatar.js';
 import { showTrackerBlock } from '../trackerBlock.js';
 import { openAddPicker } from './addPicker.js';
@@ -44,6 +44,7 @@ export function ensureRosterBar() {
     });
     bar.on('click', '.npcb-roster-block', (e) => { e.stopPropagation(); showTrackerBlock(); });
     bar.on('click', '.npcb-roster-cards .npcb-card', (e) => { e.stopPropagation(); openInstanceEditor($(e.currentTarget).data('id'), e.currentTarget); });
+    bar.on('click', '.npcb-user-scene', (e) => { e.stopPropagation(); writeCurrentScene(null, setUserInScene(!userInScene())); });
     bar.on('click', '.npcb-user-card', (e) => { e.stopPropagation(); openUserEditor(e.currentTarget); });
 }
 
@@ -83,8 +84,13 @@ export function renderRoster() {
     if (s.trackUser) {
         const c = ctx();
         const u = currentUser();
+        const inScene = userInScene(u);
         const ava = personaKey() ? `<img class="npcb-ava" src="${esc(getUserAvatar(personaKey()))}" draggable="false">` : avatarHtml(null, c.name1);
-        us.show().html(`<div class="npcb-card npcb-user-card" title="${esc(c.name1)} (you)">${ava}<div class="npcb-card-name">${esc(c.name1)}</div><div class="npcb-card-sub">${esc(u.posture || '')}</div></div>`);
+        // Out of the scene: faded avatar and "not in scene". Inline styles so SillyTavern's own CSS can't override them.
+        const fade = inScene ? '' : ' style="opacity:.35 !important; filter:grayscale(1) !important;"';
+        const sub = inScene ? esc(u.posture || '') : '<i>not in scene</i>';
+        const btn = `<div class="npcb-user-scene fa-solid ${inScene ? 'fa-door-open' : 'fa-right-to-bracket'}" title="${inScene ? 'Leave the scene' : 'Place yourself in the scene'}" style="position:absolute; top:0; right:0; font-size:.75em; padding:3px; border-radius:6px; background:var(--SmartThemeBlurTintColor, #222); cursor:pointer; opacity:.85;"></div>`;
+        us.show().html(`<div class="npcb-card npcb-user-card${inScene ? '' : ' npcb-user-out'}" style="position:relative;" title="${esc(c.name1)} (you · persona · ${inScene ? 'in-scene' : 'not-in-scene'})"><div class="npcb-user-ava"${fade}>${ava}</div><div class="npcb-card-name"${inScene ? '' : ' style="opacity:.6"'}>${esc(c.name1)}</div><div class="npcb-card-sub">${sub}</div>${btn}</div>`);
     } else us.hide().empty();
     updateAutoInjection();
 }

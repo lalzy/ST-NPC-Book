@@ -10,7 +10,7 @@ import { indent, xa, xt } from '../core/utils.js';
 import { exposureSummary, resolveOutfit } from '../logic/outfit.js';
 import { PROFILE_FIELDS } from '../logic/profile.js';
 import { normalize } from '../logic/text.js';
-import { personaData, personaDescription, promptUser } from '../scene/persona.js';
+import { personaData, personaDescription, promptUser, userInScene } from '../scene/persona.js';
 import { promptRoster, promptScene } from '../scene/roster.js';
 
 function wearingText(outfit) {
@@ -56,8 +56,10 @@ function buildUserBlock() {
     const s = settings();
     const c = ctx();
     const inner = [];
+    const present = !s.trackUser || userInScene(promptUser());
+    if (!present) inner.push(`<absent>${xt(c.name1)} is not in this scene. Do not write ${xt(c.name1)} as present: no speech, actions or reactions from them, and the characters can't see or hear them.</absent>`);
     if (s.personaInUser) { const d = personaDescription().trim(); if (d) inner.push(`<description>${xt(d)}</description>`); }
-    if (s.trackUser) {
+    if (s.trackUser && present) {
         const u = promptUser();
         const p = personaData();
         if (u.posture) inner.push(`<state posture="${xa(u.posture)}"/>`);
@@ -65,7 +67,7 @@ function buildUserBlock() {
     }
     inner.push(...extXml({ kind: 'user', name: c.name1, subject: personaData(), user: promptUser() }));
     if (!inner.length) return '';
-    return [`<user name="${xa(c.name1)}">`, ...inner.map(x => indent(x, 2)), '</user>'].join('\n');
+    return [`<user name="${xa(c.name1)}"${present ? '' : ' in_scene="false"'}>`, ...inner.map(x => indent(x, 2)), '</user>'].join('\n');
 }
 
 /**

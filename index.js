@@ -8,6 +8,7 @@ import { registerEventHandlers } from './src/events.js';
 import { registerMacros, updateAutoInjection } from './src/prompt/injection.js';
 import { applyCardStyle, decorateAll, observeChat } from './src/speakers/decorate.js';
 import { registerTurnFormatter } from './src/speakers/turnFormatter.js';
+import { bindInstancePortraitClicks } from './src/ui/instancePortrait.js';
 import { ensureLibraryModal, ensureTopButton } from './src/ui/library/modal.js';
 import { ensurePersonaButton } from './src/ui/persona/personaCharacter.js';
 import { ensureRosterBar, renderRoster } from './src/ui/roster/rosterBar.js';
@@ -27,6 +28,7 @@ jQuery(async () => {
     renderRoster();
     updateAutoInjection();
     observeChat();
+    bindInstancePortraitClicks();
     applyCardStyle();
     decorateAll();
     ensurePersonaButton();
