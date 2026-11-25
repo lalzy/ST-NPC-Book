@@ -1,6 +1,8 @@
 // NPC Library window: top-bar button, modal shell and its event wiring.
 
 import { registerFolder } from '../../core/folders.js';
+import { extensions } from '../../core/runtime.js';
+import { esc } from '../../core/utils.js';
 import { lib, save, settings } from '../../core/settings.js';
 import { bindAssist } from '../assist/assistPanel.js';
 import { selectTemplate } from './editor.js';
@@ -26,6 +28,7 @@ export function ensureLibraryModal() {
         <div class="npcb-modal-head">
           <b><i class="fa-solid fa-users-viewfinder"></i> NPC Book</b>
           <span class="npcb-spacer"></span>
+          <span class="npcb-ext-modal-btns"></span>
           <div class="menu_button npcb-lib-import" title="Import JSON"><i class="fa-solid fa-file-import"></i></div>
           <div class="menu_button npcb-lib-export" title="Export all NPCs as JSON"><i class="fa-solid fa-file-export"></i></div>
           <div class="menu_button npcb-lib-close" title="Close"><i class="fa-solid fa-xmark"></i></div>
@@ -85,12 +88,44 @@ export function ensureLibraryModal() {
     modal.on('click', '.npcb-lib-export', exportLibrary);
     modal.on('click', '.npcb-lib-import', () => modal.find('.npcb-lib-import-file').trigger('click'));
     modal.on('change', '.npcb-lib-import-file', importLibrary);
+    // Sister extensions' buttons in this header (def.modalButton), e.g. a Bestiary.
+    modal.on('click', '.npcb-ext-modal-btn', (e) => {
+        const b = modalButtons().find(x => x.key === String($(e.currentTarget).data('key')));
+        if (!b) return;
+        try { b.def.onClick(e.currentTarget); } catch (err) { console.warn(`[NPC Book] extension ${b.ext.id} modalButton.onClick failed`, err); }
+    });
     bindAssist(modal);
+    renderModalButtons();
+}
+
+/** Sister extensions' header buttons: def.modalButton is one { icon, title, onClick(anchorEl), active? } or an array of them. */
+function modalButtons() {
+    const out = [];
+    for (const ext of extensions.values()) {
+        const defs = Array.isArray(ext?.modalButton) ? ext.modalButton : ext?.modalButton ? [ext.modalButton] : [];
+        defs.forEach((def, i) => { if (def && typeof def.onClick === 'function') out.push({ ext, def, key: `${ext.id}:${i}` }); });
+    }
+    return out;
+}
+
+/** Draw the sister extensions' buttons in the NPC Book window header (call after registering / unregistering). */
+export function renderModalButtons() {
+    const host = $('#npcb_library .npcb-ext-modal-btns');
+    if (!host.length) return;
+    const val = (v, fallback) => { try { return (typeof v === 'function' ? v() : v) || fallback; } catch { return fallback; } };
+    host.html(modalButtons().map(({ ext, def, key }) => {
+        const icon = String(val(def.icon, 'fa-puzzle-piece'));
+        const title = String(val(def.title, ext.label || ext.id));
+        const label = val(def.label, '');
+        const dim = typeof def.active === 'function' && val(def.active, true) === false;
+        return `<div class="menu_button npcb-ext-modal-btn${dim ? ' npcb-dim' : ''}" data-key="${esc(key)}" title="${esc(title)}"><i class="fa-solid ${esc(icon)}"></i>${label ? ` ${esc(label)}` : ''}</div>`;
+    }).join(''));
 }
 
 export function openLibrary(id = null, isNew = false, tab = 'card') {
     ensureLibraryModal();
     $('#npcb_library').css('display', 'flex');
+    renderModalButtons();
     renderLibraryList();
     const first = id ?? libState.selected ?? Object.keys(lib()).sort()[0] ?? null;
     selectTemplate(isNew ? null : first, isNew || !first, tab);

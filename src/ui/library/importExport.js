@@ -2,6 +2,7 @@
 
 import { normFolder, registerFolder } from '../../core/folders.js';
 import { lib, save } from '../../core/settings.js';
+import { idTaken } from '../../core/libraries.js';
 import { clone } from '../../core/utils.js';
 import { downscaleUrl, uploadPortrait } from '../../images/imageTools.js';
 import { ID_PATTERN, slugify, uniqueId } from '../../logic/text.js';
@@ -48,7 +49,7 @@ export async function importLibrary(e) {
             if (!raw?.name) continue;
             let id = String(raw.id || '').toLowerCase();
             if (!ID_PATTERN.test(id)) id = slugify(raw.name);
-            if (lib()[id]) { id = uniqueId(id, x => !!lib()[x]); renamed++; }
+            if (idTaken(id)) { id = uniqueId(id, x => idTaken(x)); renamed++; }
             const npc = { portrait: '', description: '', details: '', traits: {}, height: '', pronouns: '', sexuality: '', sexualExperience: '', dialogue: [], ...raw, id, created: Date.now() };
             if (String(npc.portrait).startsWith('data:')) {
                 try { npc.portrait = await uploadPortrait(npc.portrait, id); } catch (err) { console.warn('[NPC Book] portrait upload failed, keeping it inline', err); }

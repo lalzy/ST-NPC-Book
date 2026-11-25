@@ -5,6 +5,7 @@ import { SLOT_LABEL } from './constants.js';
 import { ctx, hasChat } from './core/context.js';
 import { extensions } from './core/runtime.js';
 import { lib, save, settings } from './core/settings.js';
+import { allTemplates, anyTemplate, idTaken, libraryOf } from './core/libraries.js';
 import { clone, esc, indent, initials, xa, xt } from './core/utils.js';
 import { cloneScene } from './logic/instances.js';
 import { parseLenientJson } from './logic/json.js';
@@ -15,12 +16,12 @@ import { cleanId, normalize, pickEnum, slugify, uniqueId } from './logic/text.js
 import { closestEnum } from './logic/enumMatch.js';
 import { updateAutoInjection } from './prompt/injection.js';
 import { currentUser, personaData, personaKey } from './scene/persona.js';
-import { currentScene, currentRoster, findInstance, promptScene, rosterAtMessage, writeCurrentScene } from './scene/roster.js';
+import { addToScene, currentScene, currentRoster, findInstance, promptScene, removeFromScene, rosterAtMessage, writeCurrentScene } from './scene/roster.js';
 import { avatarHtml } from './ui/avatar.js';
 import { injectStyle } from './ui/injectStyle.js';
 import { selectTemplate } from './ui/library/editor.js';
 import { openTemplateExtSheet } from './ui/library/extSheet.js';
-import { openLibrary } from './ui/library/modal.js';
+import { closeLibrary, openLibrary, renderModalButtons } from './ui/library/modal.js';
 import { libState } from './ui/library/state.js';
 import { openPersonaCharacter } from './ui/persona/personaCharacter.js';
 import { closePopovers, placePopover } from './ui/popover.js';
@@ -32,8 +33,10 @@ import { bindTabs } from './ui/tabs.js';
 /** API version. 6 added: onTrackerEntry, transformEntry, entryKeys, placeholders, transformInstructions, transformScene,
  *  unregisterExtension, getExtData, setExtData, getUser, refreshPrompts. 7 added: outfitCatalog, onInstanceCreate,
  *  cardTab/personaSheet onSave, render ctx id/scope, sceneXml scene/sceneIds, onTrackerEntry scene, clothing, ui,
- *  getChatScene, getPromptScene, getSettings, openSheet. Full contract: EXTENDING.md. */
-export const API_VERSION = 8;
+ *  getChatScene, getPromptScene, getSettings, openSheet. 8 added chatTab. 9 added modalButton, templateLibrary,
+ *  isIdTaken, uniqueTemplateId, getAnyTemplate, getAllTemplates, getCardTabs, libraryOf, addToScene, removeFromScene, closeLibrary, refreshModalButtons.
+ *  Full contract: EXTENDING.md. */
+export const API_VERSION = 9;
 
 /** Open an extension's sheet for one character in a popup. scope: 'instance' (this chat), 'template' (card), 'persona'. */
 function openSheet(ref, extId, { scope = 'instance' } = {}) {
@@ -122,6 +125,7 @@ export function exposePublicApi() {
         registerExtension(def) {
             if (!def?.id) throw new Error('registerExtension: id required');
             extensions.set(def.id, def);
+            renderModalButtons();
             refreshOpenEditor();
             renderRoster();
             updateAutoInjection();
@@ -129,13 +133,40 @@ export function exposePublicApi() {
         /** Remove a registered extension. Its stored data is kept. Returns true when it was registered. */
         unregisterExtension(id) {
             const had = extensions.delete(id);
-            if (had) { refreshOpenEditor(); renderRoster(); updateAutoInjection(); }
+            if (had) { renderModalButtons(); refreshOpenEditor(); renderRoster(); updateAutoInjection(); }
             return had;
         },
         /** Redraw the scene bar (and its sister-extension buttons) and refresh injected prompts. */
         refreshScene: () => renderRoster(),
         getLibrary: () => lib(),
         getTemplate: (id) => lib()[id] || null,
+        /** A card from NPC Book's library or any extension library (templateLibrary), or null. */
+        getAnyTemplate: (id) => anyTemplate(id),
+        /** Every card: NPC Book's library plus extension libraries ({ [id]: template }, live objects). */
+        getAllTemplates: () => allTemplates(),
+        /** True when an id is used by NPC Book's library or any extension library. Ids are unique across all of them. */
+        isIdTaken: (id) => idTaken(id),
+        /** A free id made from a name or id (slugified; "_2", "_3"… added while taken in any library or this chat). */
+        uniqueTemplateId: (base) => uniqueId(base, x => idTaken(x) || (hasChat() && !!currentScene().instances[x])),
+        /** The extension id whose templateLibrary holds this card, 'npcbook' for NPC Book's own library, or null. */
+        libraryOf: (id) => (lib()[String(id ?? '')] ? 'npcbook' : libraryOf(id)?.id ?? null),
+        /** Put a card (any library) or this chat's instance into the scene. */
+        addToScene: (id) => addToScene(id),
+        /** Take an NPC out of the scene (its instance stays in the chat). */
+        removeFromScene: (id) => removeFromScene(id),
+        /** Close the NPC Book window. */
+        closeLibrary: () => closeLibrary(),
+        /**
+         * Registered sister extensions' card tabs, so an extension library (e.g. a Bestiary) can show the same tabs as an NPC card:
+         * [{ id, label, icon, render(host, ctx), onSave?(info), defaultData() }]. `host` must be a jQuery element.
+         */
+        getCardTabs: () => [...extensions.values()].filter(x => x?.cardTab && typeof x.cardTab.render === 'function').map(x => ({
+            id: x.id, label: x.cardTab.label || x.label || x.id, icon: x.cardTab.icon || 'fa-table-list',
+            render: x.cardTab.render, onSave: x.cardTab.onSave,
+            defaultData: () => (typeof x.defaultData === 'function' ? x.defaultData() : {}),
+        })),
+        /** Redraw sister extensions' buttons in the NPC Book window header (after their icon / title / active state changed). */
+        refreshModalButtons: () => renderModalButtons(),
         getPersonaData: (extId) => personaData().ext?.[extId] ?? null,
         /**
          * Who is in the current scene: [{ id, name, instance, template }] plus your persona's name.
@@ -151,7 +182,7 @@ export function exposePublicApi() {
         /** The open chat's instance of an NPC (active or not), or null. */
         getInstance: (ref) => (hasChat() ? findInstance(ref) : null),
         /** Resolve an id or name (as written by the LLM in <npc id="…">): this chat's instance first, then the library. */
-        resolveNpc: (ref) => (hasChat() ? findInstance(ref)?.id : null) ?? resolveRef(ref, lib()),
+        resolveNpc: (ref) => (hasChat() ? findInstance(ref)?.id : null) ?? resolveRef(ref, allTemplates()),
         /** This chat's user state (posture, outfit, and `ext` once an extension wrote per-chat user data), or null. */
         getUser: () => (hasChat() ? clone(currentUser()) : null),
         getExtData,

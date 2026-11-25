@@ -4,6 +4,7 @@ import { MODULE } from '../constants.js';
 import { ctx, hasChat, meta } from '../core/context.js';
 import { claimedEntryKeys, outfitCatalog, runEntryHooks, transformEntry } from '../core/extHooks.js';
 import { lib, settings } from '../core/settings.js';
+import { allTemplates } from '../core/libraries.js';
 import { clone, esc, sig } from '../core/utils.js';
 import { applyCastOverrides, extractCharacterList } from '../logic/castList.js';
 import { attachInstance, cloneScene, toScene } from '../logic/instances.js';
@@ -89,7 +90,7 @@ function parseBool(v) {
 function isUserRef(ref) {
     const n = normalize(ref);
     const name1 = normalize(ctx().name1);
-    return ['user', 'you', 'persona'].includes(n) || (!!name1 && n === name1 && !lib()[String(ref).trim().toLowerCase()]);
+    return ['user', 'you', 'persona'].includes(n) || (!!name1 && n === name1 && !allTemplates()[String(ref).trim().toLowerCase()]);
 }
 
 /**
@@ -131,8 +132,8 @@ function applyIntroCast(entries, carried, user, notes) {
                 (x, d) => { u.ext = { ...(u.ext || {}), [x]: d }; });
             continue;
         }
-        const id = resolveRef(e.ref, scene.instances) ?? resolveRef(e.ref, lib());
-        const inst = id ? attachInstance(scene, id, lib(), instanceOpts()) : null;
+        const id = resolveRef(e.ref, scene.instances) ?? resolveRef(e.ref, allTemplates());
+        const inst = id ? attachInstance(scene, id, allTemplates(), instanceOpts()) : null;
         if (!inst) { notes.missing.add(e.ref); continue; }
         const cat = outfitCatalog({ source: 'greeting', kind: 'char', id: inst.id, subject: inst, ext: inst.ext || {} });
         const r = applyCastOverrides({ ...inst, outfit: resolveOutfit(inst.outfit, inst.wardrobe || []) }, e.overrides, { ...opts, catalog: cat.items, strict: cat.strict });

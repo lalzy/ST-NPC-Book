@@ -3,6 +3,7 @@
 import { outfitCatalog, sheetSaved } from '../../core/extHooks.js';
 import { extensions } from '../../core/runtime.js';
 import { lib, settings } from '../../core/settings.js';
+import { libraryOf, openInLibrary } from '../../core/libraries.js';
 import { clone, esc } from '../../core/utils.js';
 import { cloneScene } from '../../logic/instances.js';
 import { resolveOutfit } from '../../logic/outfit.js';
@@ -22,7 +23,8 @@ export function openInstanceEditor(id, anchor) {
     const t = inst;
     const s = settings();
     const name = t?.name ?? inst.name ?? id;
-    const template = lib()[inst.instanceOf ?? id] ? (inst.instanceOf ?? id) : null; // only for the "Card" shortcut to the Library
+    const tplId = inst.instanceOf ?? id;
+    const template = (lib()[tplId] || libraryOf(tplId)?.templateLibrary?.open) ? tplId : null; // only for the "Card" shortcut to its library
     const opts = (list, cur) => {
         const all = [...list];
         if (cur && !all.includes(cur)) all.unshift(cur);
@@ -105,7 +107,7 @@ export function openInstanceEditor(id, anchor) {
         closePopovers();
     });
     pop.on('click', '.npcb-i-remove', () => { removeFromScene(id); closePopovers(); });
-    pop.on('click', '.npcb-i-card', () => { closePopovers(); openLibrary(template); });
+    pop.on('click', '.npcb-i-card', () => { closePopovers(); if (!openInLibrary(template)) openLibrary(template); });
     pop.on('click', '.npcb-i-ext', (e) => { const x = $(e.currentTarget).data('ext'); closePopovers(); openInstanceExtSheet(id, x); });
     placePopover(pop, anchor);
 }

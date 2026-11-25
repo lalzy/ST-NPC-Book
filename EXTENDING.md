@@ -44,7 +44,7 @@ if (window.NPCBook) register(window.NPCBook);
 else document.addEventListener('npcbook:ready', e => register(e.detail), { once: true });
 ```
 
-Check `api.apiVersion` (currently **7**) if you rely on something newer than the version that introduced it (listed in section 9).
+Check `api.apiVersion` (currently **9**) if you rely on something newer than the version that introduced it (listed in section 9).
 
 ---
 
@@ -93,6 +93,13 @@ Every hook is called inside a try/catch. A hook that throws is logged to the con
 
 Icons default to `fa-table-list` (sheets) and `fa-puzzle-piece` (scene buttons).
 
+### Window header and extension libraries (API 9)
+
+| Member | Called | Arguments / return |
+|---|---|---|
+| `modalButton: { icon, title, label?, active?, onClick(anchorEl) }` (or an array of them) | A button in the NPC Book window header (`.npcb-modal-head`, before Import / Export / Close). | `icon` (Font Awesome class), `title` and `label` are strings or functions returning them. `active() === false` dims it. Call `NPCBook.refreshModalButtons()` after changing them. |
+| `templateLibrary: { label, getAll(), claim?(entry, template), add?(template, entry), open?(id) }` | Your own store of cards next to the NPC Library (for example a Bestiary of enemies). | `getAll()` returns `{ [id]: card }` with NPC Book's card shape. NPC Book then treats those ids as taken (ids are unique across the NPC Library and every extension library), finds those cards by id or name (`<npc id="…">` speaker blocks, tracker matching, greetings, `addToScene`), and copies them into chats like NPC cards. When the tracker creates a NEW character, the first library whose `claim(entry, template)` returns true gets it through `add(template, entry)` instead of the NPC Library (your other `fromTracker` data is already on `template.ext`). `open(id)` is used by the chat popover's **Card** button for your cards. |
+
 ### Prompt: what the AI is told
 
 | Member | Called | Arguments / return |
@@ -136,7 +143,7 @@ The Wardrobe extension is the full example: its catalog is the character's wardr
 
 | Member | Description |
 |---|---|
-| `apiVersion` / `version` | `6`. |
+| `apiVersion` / `version` | `9`. |
 | `registerExtension(def)` / `unregisterExtension(id)` | See section 3. |
 | `getScene()` | `{ roster: [{ id, name, instance, template }], userName }`: who is in the scene now (`template` equals `instance`; it is kept for older extensions). |
 | `getRosterAt(messageIndex)` | Who was in the scene at a chat message. |
@@ -154,6 +161,12 @@ The Wardrobe extension is the full example: its catalog is the character's wardr
 | `refreshPrompts()` | Refresh the injected prompts only. |
 | `openPersonaCharacter(tab?)` | Open the persona window (`'wardrobe'` or `'ext:<id>'`). |
 | `saveSettings()` | Save extension settings, after you change a template or persona object directly. |
+| `getAnyTemplate(id)` / `getAllTemplates()` | A card / every card from the NPC Library and all extension libraries (API 9). |
+| `isIdTaken(id)` / `uniqueTemplateId(base)` | Whether an id is used in any library / a free id made from a name (API 9). |
+| `libraryOf(id)` | `'npcbook'`, the extension id whose `templateLibrary` holds the card, or `null` (API 9). |
+| `addToScene(id)` / `removeFromScene(id)` | Put a card (any library) into this chat's scene / take it out (API 9). |
+| `getCardTabs()` | Every registered `cardTab` as `{ id, label, icon, render, onSave, defaultData }`, so an extension library can show the same tabs as an NPC card (API 9). |
+| `closeLibrary()` / `refreshModalButtons()` | Close the NPC Book window / redraw the header buttons (API 9). |
 | `util` | `esc` (HTML), `xa` (XML attribute), `xt` (XML text), `normalize`, `slugify`, `indent`, `clone`, `uniqueId`, `pickEnum`, `cleanId`, `initials`, `parseJson` (lenient JSON, e.g. for LLM answers). |
 | `clothing` | The clothing model: `SLOTS`, `SLOT_LABEL`, `STACKING_SLOTS`, `inferSlots`, `normalizeSlot(s)`, `findItem`, `findItemLoose`, `makeItem`, `wearItem`, `outfitBySlot`, `resolveOutfit`, `applyClothing`, `exposureSummary`. |
 | `ui` | NPC Book's UI pieces, so extensions look the same: `avatarHtml`, `injectStyle`, `bindTabs`, `closePopovers`, `placePopover`, `openCard(id, tab)`, `openInstanceEditor(id, anchor)`, `personaAvatar()`. |
@@ -220,3 +233,4 @@ Listen on `document`:
 | 6 | `onTrackerEntry`, `transformEntry`, `entryKeys`, `placeholders`, `transformInstructions`, `transformScene`, `unregisterExtension`, `getExtData`, `setExtData`, `getUser`, `refreshPrompts`. `sheetLabel` and the icon options are now documented. |
 | 7 | Wardrobe and Relationships moved out of NPC Book into sister extensions. Added `outfitCatalog`, `onInstanceCreate`, `cardTab`/`personaSheet` `onSave`, render `ctx.id`/`scope`/`subject`, `sceneXmlAlways`, `sceneXml` `scene`/`sceneIds`, `onTrackerEntry` `scene`/`user`, `getChatScene`, `getPromptScene`, `getSettings`, `openSheet`, `util` additions, `clothing`, `ui`. Outfits are self-contained items (any clothing). |
 | 8 | `chatTab`: a `cardTab` can also be a tab in a chat NPC's popover. Wardrobe and Relationships use it. |
+| 9 | `modalButton` (NPC Book window header) and `templateLibrary` (extension card stores, e.g. a Bestiary; ids unique across all libraries; new characters can be claimed by a library). API: `getAnyTemplate`, `getAllTemplates`, `isIdTaken`, `uniqueTemplateId`, `libraryOf`, `addToScene`, `removeFromScene`, `getCardTabs`, `closeLibrary`, `refreshModalButtons`. `resolveNpc` also looks in extension libraries. |

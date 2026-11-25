@@ -5,6 +5,7 @@ import { ctx, excludedNames } from '../core/context.js';
 import { newNpcFolder, registerFolder } from '../core/folders.js';
 import { pickColor } from '../core/npcs.js';
 import { outfitCatalog, runEntryHooks, transformEntries } from '../core/extHooks.js';
+import { addToLibrary, allTemplates, claimingLibrary } from '../core/libraries.js';
 import { extensions, runtime } from '../core/runtime.js';
 import { lib, save, settings } from '../core/settings.js';
 import { clone, sig } from '../core/utils.js';
@@ -35,7 +36,7 @@ async function askMatches(list, scene, excludeNames, beforeAsk, earlierTexts) {
     const s = settings();
     const { lookups } = findLookups(list, scene, {
         isSpecified: (name) => nameMentioned(name, earlierTexts),
-        library: lib(),
+        library: allTemplates(),
         threshold: s.threshold / 100,
         numericTolerance: s.numericTolerance,
         excludeNames,
@@ -46,7 +47,7 @@ async function askMatches(list, scene, excludeNames, beforeAsk, earlierTexts) {
     const sc = toScene(scene);
     for (let k = 0; k < lookups.length; k++) {
         const lk = lookups[k];
-        const pool = lk.source === 'instance' ? sc.instances : lib();
+        const pool = lk.source === 'instance' ? sc.instances : allTemplates();
         try { choices[lk.index] = await pickMatch(lk, pool, { step: k + 1, steps: lookups.length }); } catch (e) {
             console.error('[NPC Book] match popup failed', e);
             choices[lk.index] = { create: true };
@@ -111,8 +112,8 @@ function greetingCast(idx, base) {
     }
     const assistantMode = c.characterId === undefined && !c.groupId;
     if (s.trackChar && !assistantMode && !c.groupId && c.name2) {
-        const id = resolveRef(c.name2, scene.instances) ?? resolveRef(c.name2, lib());
-        if (id) attachInstance(scene, id, lib(), instanceOpts());
+        const id = resolveRef(c.name2, scene.instances) ?? resolveRef(c.name2, allTemplates());
+        if (id) attachInstance(scene, id, allTemplates(), instanceOpts());
     }
     return scene;
 }
@@ -211,9 +212,12 @@ export async function processLastMessage() {
                 const { choices, lookups } = await askMatches(npcEntries, post, excludeNames, () => c.updateMessageBlock(idx, msg), earlier);
                 if ((ctx().chat || [])[idx] !== msg) return; // the chat changed while the popup was open
                 // The block lists changes, so apply it to the scene as it stood before this text was written.
+                // New characters an extension library claims (e.g. enemies for a Bestiary) are stored there, not in the NPC Library.
+                const claimedBy = new Map();
                 const r = applyTracker(npcEntries, post, {
                     choices,
-                    library: lib(),
+                    // Every card NPC Book knows: its own library and the extension libraries. Ids are unique across all of them.
+                    library: allTemplates(),
                     threshold: s.threshold / 100,
                     numericTolerance: s.numericTolerance,
                     postures: s.postures,
@@ -226,8 +230,9 @@ export async function processLastMessage() {
                     // A new NPC's template is finished here, before its instance is copied from it.
                     prepareNew: (t, entry) => {
                         t.color = t.color || pickColor();
-                        t.folder = newNpcFolder();
-                        registerFolder(t.folder);
+                        const owner = entry ? claimingLibrary(entry, t) : null;
+                        if (owner) claimedBy.set(t.id, owner);
+                        else { t.folder = newNpcFolder(); registerFolder(t.folder); }
                         for (const ext of extensions.values()) {
                             if (typeof ext.fromTracker !== 'function' || !entry) continue;
                             try { const d = ext.fromTracker(entry, t); if (d) { t.ext = t.ext || {}; t.ext[ext.id] = d; } } catch (e) { console.warn(`[NPC Book] ${ext.id} fromTracker failed`, e); }
@@ -242,7 +247,12 @@ export async function processLastMessage() {
                     catalogFor: (inst) => (s.trackOutfits ? outfitCatalog({ source: 'tracker', kind: 'char', id: inst.id, subject: inst, ext: inst.ext || {} }) : { items: [], strict: false }),
                     onCreate: instanceOpts().onCreate,
                 });
-                for (const t of r.created) lib()[t.id] = t;
+                const createdNpcs = [], createdExt = [];
+                r.created.forEach((t, i) => {
+                    const owner = claimedBy.get(t.id);
+                    if (owner && addToLibrary(owner, t, r.createdEntries?.[i])) createdExt.push({ t, owner });
+                    else { lib()[t.id] = t; createdNpcs.push(t); }
+                });
                 if (r.skipped?.length) {
                     toastr.warning(`Skipped ${r.skipped.length} more new character${r.skipped.length > 1 ? 's' : ''} (limit ${s.maxNewPerReply} per reply): ${r.skipped.join(', ')}`, 'NPC Book');
                 }
@@ -255,10 +265,15 @@ export async function processLastMessage() {
                 if (ex.repaired) {
                     toastr.info(`${ex.repaired} entr${ex.repaired === 1 ? 'y' : 'ies'} had a broken part (like a stats sheet) that was dropped; the rest was kept.`, 'NPC Book');
                 }
-                if (r.created.length) {
+                if (createdNpcs.length) {
                     save();
-                    toastr.info(`New NPC${r.created.length > 1 ? 's' : ''}: ${r.created.map(t => `${t.name} (${t.id})`).join(', ')}`, 'NPC Book');
+                    toastr.info(`New NPC${createdNpcs.length > 1 ? 's' : ''}: ${createdNpcs.map(t => `${t.name} (${t.id})`).join(', ')}`, 'NPC Book');
                     renderLibraryList();
+                }
+                for (const owner of new Set(createdExt.map(x => x.owner))) {
+                    const list = createdExt.filter(x => x.owner === owner).map(x => `${x.t.name} (${x.t.id})`);
+                    const where = owner.templateLibrary.label || owner.label || owner.id;
+                    toastr.info(`New in ${where}: ${list.join(', ')}`, 'NPC Book');
                 }
 
                 post = r.scene;

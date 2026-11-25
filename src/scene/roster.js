@@ -4,6 +4,7 @@
 import { MODULE } from '../constants.js';
 import { ctx, hasChat, meta } from '../core/context.js';
 import { instanceCreated } from '../core/extHooks.js';
+import { allTemplates } from '../core/libraries.js';
 import { runtime } from '../core/runtime.js';
 import { lib, settings } from '../core/settings.js';
 import { clone } from '../core/utils.js';
@@ -111,7 +112,7 @@ export function addToScene(id) {
     if (!hasChat()) return;
     const scene = cloneScene(currentScene());
     if (scene.active.includes(id)) return;
-    if (!attachInstance(scene, id, lib(), instanceOpts())) return;
+    if (!attachInstance(scene, id, allTemplates(), instanceOpts())) return;
     writeCurrentScene(scene);
 }
 

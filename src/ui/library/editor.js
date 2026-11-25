@@ -7,6 +7,7 @@ import { pickColor } from '../../core/npcs.js';
 import { outfitCatalog, sheetSaved } from '../../core/extHooks.js';
 import { extensions } from '../../core/runtime.js';
 import { lib, save, settings } from '../../core/settings.js';
+import { idTaken, libraryOf } from '../../core/libraries.js';
 import { clone, esc } from '../../core/utils.js';
 import { cropImageUrl, readFileAsDataUrl, uploadPortrait } from '../../images/imageTools.js';
 import { startingOutfit } from '../../logic/outfit.js';
@@ -192,7 +193,7 @@ export function selectTemplate(id, isNew = false, tab = 'card') {
         selectTemplate(t.id);
     });
     ed.on('click.npcb', '.npcb-ed-dup', () => {
-        const id2 = uniqueId(t.id, x => !!lib()[x]);
+        const id2 = uniqueId(t.id, x => idTaken(x));
         lib()[id2] = { ...clone(t), id: id2, auto: false, created: Date.now() };
         save();
         selectTemplate(id2);
@@ -217,9 +218,9 @@ async function saveTemplateFromEditor(t, isNew) {
     let id = t.id;
     if (isNew) {
         const raw = String(ed.find('.npcb-ed-id').val() ?? '').trim().toLowerCase();
-        id = raw || uniqueId(name, x => !!lib()[x]);
+        id = raw || uniqueId(name, x => idTaken(x));
         if (!ID_PATTERN.test(id)) { toastr.warning('ID may only contain a–z, 0–9, _ and -, and must start with a letter or digit.', 'NPC Book'); return; }
-        if (lib()[id]) { toastr.warning(`ID "${id}" is already taken.`, 'NPC Book'); return; }
+        if (idTaken(id)) { const where = libraryOf(id); toastr.warning(`ID "${id}" is already taken${where ? ` (in ${where.templateLibrary.label || where.label || where.id})` : ''}.`, 'NPC Book'); return; }
     }
     let color = String(ed.find('.npcb-ed-colorhex').val() ?? '').trim();
     if (/^[0-9a-f]{6}$/i.test(color)) color = `#${color}`;

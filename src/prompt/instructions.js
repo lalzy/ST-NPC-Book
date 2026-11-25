@@ -4,6 +4,7 @@ import { DEFAULT_USER_RULE, TRAIT_SAMPLES } from '../constants.js';
 import { ctx, excludedNames, hasChat } from '../core/context.js';
 import { extsWith, pipe } from '../core/extHooks.js';
 import { extensions } from '../core/runtime.js';
+import { allTemplates } from '../core/libraries.js';
 import { lib, settings } from '../core/settings.js';
 import { resolveRef } from '../logic/matching.js';
 import { SLOTS } from '../logic/slots.js';
@@ -73,7 +74,7 @@ function speakerIds() {
     const scene = promptScene();
     const ids = [...scene.active];
     if (settings().trackChar && c.characterId !== undefined && !c.groupId && c.name2) {
-        const id = resolveRef(c.name2, scene.instances) ?? resolveRef(c.name2, lib());
+        const id = resolveRef(c.name2, scene.instances) ?? resolveRef(c.name2, allTemplates());
         if (id && !ids.includes(id)) ids.unshift(id);
     }
     return ids;

@@ -239,3 +239,8 @@ body > .npcb-popover.npcb-menu { position: fixed !important; z-index: 10050 !imp
 .npcb-pview img.npcb-pview-img { display: block !important; max-width: 100% !important; max-height: 78vh !important; width: auto !important; height: auto !important; object-fit: contain !important; border-radius: 8px !important; margin: 0 auto !important; }
 .npcb-popover.npcb-inst .npcb-inst-head .npcb-ava { cursor: pointer !important; pointer-events: auto !important; transition: filter .15s ease, box-shadow .15s ease; }
 .npcb-popover.npcb-inst .npcb-inst-head .npcb-ava:hover { filter: brightness(1.15); box-shadow: 0 0 0 2px var(--SmartThemeQuoteColor, #888) !important; }
+
+/* Sister extensions' buttons in the NPC Book window header (def.modalButton) */
+.npcb-ext-modal-btns { display: flex; align-items: center; gap: 6px; }
+.npcb-ext-modal-btns:empty { display: none; }
+.npcb-ext-modal-btns .menu_button { margin: 0; }

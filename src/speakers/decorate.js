@@ -1,6 +1,7 @@
 // Speaker card decoration in rendered messages (avatar, color) and the chat observer.
 
 import { hasChat } from '../core/context.js';
+import { allTemplates } from '../core/libraries.js';
 import { lib, settings } from '../core/settings.js';
 import { initials } from '../core/utils.js';
 import { resolveRef } from '../logic/matching.js';
@@ -17,8 +18,10 @@ function decorateTurn(turn) {
     if (!ava) return;
     const raw = turn.getAttribute('data-npcb-turn') || '';
     const inst = hasChat() ? findInstance(raw) : null;
-    const id = inst?.id ?? resolveRef(raw, lib());
-    const t = inst ?? (id ? lib()[id] : null);
+    // Not in this chat yet: NPC Book's library or an extension library (e.g. a Bestiary), since ids are unique across them.
+    const all = inst ? null : allTemplates();
+    const id = inst?.id ?? resolveRef(raw, all);
+    const t = inst ?? (id ? all[id] : null);
     if (inst && !inst.portrait) ensurePortrait(inst.id, { target: 'instance' });
     const key = `${id}|${t?.portrait || ''}|${t?.color || ''}|${t?.name || ''}`;
     if (ava.dataset.npcbKey === key) return;
