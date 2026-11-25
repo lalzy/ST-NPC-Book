@@ -16,6 +16,7 @@ import { showTrackerBlock } from '../trackerBlock.js';
 import { openAddPicker } from './addPicker.js';
 import { openInstanceEditor } from './instanceEditor.js';
 import { openNewNpcFolderMenu } from './newNpcFolderMenu.js';
+import { pendingTemplateChanges } from './templateSync.js';
 import { openUserEditor } from './userEditor.js';
 
 export function ensureRosterBar() {
@@ -73,8 +74,9 @@ export function renderRoster() {
         if (!t.portrait) ensurePortrait(t.id, { target: 'instance' });
         const name = t?.name ?? inst.name ?? inst.id;
         const sub = [inst.posture, inst.state].filter(Boolean).join(' · ');
-        return `<div class="npcb-card" data-id="${esc(inst.id)}" title="${esc(name)}${inst.feelings ? `\n💭 ${esc(inst.feelings)}` : ''}">
-            ${avatarHtml(t, name)}
+        const changed = pendingTemplateChanges(inst).length > 0;
+        return `<div class="npcb-card" data-id="${esc(inst.id)}" title="${esc(name)}${inst.feelings ? `\n💭 ${esc(inst.feelings)}` : ''}${changed ? '\n⟳ Template card changed (click, then Sync)' : ''}">
+            ${changed ? '<span class="npcb-card-sync fa-solid fa-rotate"></span>' : ''}${avatarHtml(t, name)}
             <div class="npcb-card-name" ${HEX_RE.test(t?.color || '') ? `style="color:${t.color}"` : ''}>${esc(name)}</div>
             <div class="npcb-card-sub">${esc(sub)}</div>
         </div>`;

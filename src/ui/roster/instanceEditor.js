@@ -2,19 +2,19 @@
 
 import { outfitCatalog, sheetSaved } from '../../core/extHooks.js';
 import { extensions } from '../../core/runtime.js';
-import { lib, settings } from '../../core/settings.js';
-import { libraryOf, openInLibrary } from '../../core/libraries.js';
+import { settings } from '../../core/settings.js';
 import { clone, esc } from '../../core/utils.js';
 import { cloneScene } from '../../logic/instances.js';
 import { resolveOutfit } from '../../logic/outfit.js';
 import { currentScene, removeFromScene, writeCurrentScene } from '../../scene/roster.js';
 import { avatarHtml } from '../avatar.js';
 import { openInstancePortraitMenuFor } from '../instancePortrait.js';
-import { openLibrary } from '../library/modal.js';
 import { closePopovers, placePopover } from '../popover.js';
 import { bindTabs } from '../tabs.js';
 import { mountPaperdoll } from '../wardrobe/paperdoll.js';
+import { openInstanceCard } from './instanceCard.js';
 import { openInstanceExtSheet } from './instanceExtSheet.js';
+import { openTemplateSync, pendingTemplateChanges, syncGroupLabel } from './templateSync.js';
 
 export function openInstanceEditor(id, anchor) {
     closePopovers();
@@ -23,8 +23,7 @@ export function openInstanceEditor(id, anchor) {
     const t = inst;
     const s = settings();
     const name = t?.name ?? inst.name ?? id;
-    const tplId = inst.instanceOf ?? id;
-    const template = (lib()[tplId] || libraryOf(tplId)?.templateLibrary?.open) ? tplId : null; // only for the "Card" shortcut to its library
+    const changes = pendingTemplateChanges(inst); // template fields changed since this chat copied (or last synced) them
     const opts = (list, cur) => {
         const all = [...list];
         if (cur && !all.includes(cur)) all.unshift(cur);
@@ -49,7 +48,8 @@ export function openInstanceEditor(id, anchor) {
         ${extTabs.map(x => `<div class="npcb-tabpane" data-pane="ext:${esc(x.id)}" style="display:none"><div class="npcb-ext-host" data-ext="${esc(x.id)}"></div></div>`).join('')}
         <div class="npcb-row">
             <div class="menu_button npcb-i-save"><i class="fa-solid fa-check"></i> Save</div>
-            <div class="menu_button npcb-i-card" ${template ? '' : 'style="display:none"'}><i class="fa-solid fa-id-card"></i> Card</div>
+            <div class="menu_button npcb-i-card" title="This chat's own copy of the card"><i class="fa-solid fa-id-card"></i> Card</div>
+            ${changes.length ? `<div class="menu_button npcb-i-sync" title="The template card changed: ${esc(changes.map(syncGroupLabel).join(', '))}. Click to pick what to copy into this chat."><i class="fa-solid fa-rotate"></i> Sync</div>` : ''}
             <div class="menu_button npcb-i-remove redWarningBG"><i class="fa-solid fa-user-minus"></i> Remove</div>
         </div>
         <div class="npcb-row">${[...extensions.values()].filter(x => x.cardTab && !x.chatTab).map(x => `<div class="menu_button npcb-i-ext" data-ext="${esc(x.id)}"><i class="fa-solid ${esc(x.personaSheet?.icon || x.cardTab.icon || 'fa-table-list')}"></i> ${esc(x.sheetLabel || `${x.cardTab.label || x.id} sheet`)}</div>`).join('')}</div>
@@ -107,7 +107,8 @@ export function openInstanceEditor(id, anchor) {
         closePopovers();
     });
     pop.on('click', '.npcb-i-remove', () => { removeFromScene(id); closePopovers(); });
-    pop.on('click', '.npcb-i-card', () => { closePopovers(); if (!openInLibrary(template)) openLibrary(template); });
+    pop.on('click', '.npcb-i-card', () => { closePopovers(); openInstanceCard(id); });
+    pop.on('click', '.npcb-i-sync', () => { closePopovers(); openTemplateSync(id); });
     pop.on('click', '.npcb-i-ext', (e) => { const x = $(e.currentTarget).data('ext'); closePopovers(); openInstanceExtSheet(id, x); });
     placePopover(pop, anchor);
 }
