@@ -40,7 +40,7 @@ Every setting has an ⓘ icon: hover over it for a short explanation, or click i
 ## Using it
 
 ### NPC Library
-The top-bar button ![button](https://github.com/lalzy/ST-NPC-Book/raw/main/icon.png) opens your NPCs where you have all of the details for the character. Details of the character written here are sent to the LLM when in the scene.
+The top-bar button ![button](https://github.com/lalzy/ST-NPC-Book/blob/main/icon.svg) opens your NPCs where you have all of the details for the character. Details of the character written here are sent to the LLM when in the scene.
 ![NPC library](https://github.com/lalzy/ST-NPC-Book/raw/main/image1.png) 
 
 ### Scene bar
