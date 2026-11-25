@@ -163,7 +163,7 @@ export function applyTracker(list, prevScene, { library, threshold, numericToler
  * Returns [{ index, entry, source: 'instance' | 'template', candidates: [{ id, score }] }]
  * (only entries with at least one candidate), and `unmatched`: indexes that had a name but no candidate.
  */
-export function findLookups(list, prevScene, { library, threshold, numericTolerance, excludeNames = [], minScore = 0.7, limit = 5, isSpecified = null }) {
+export function findLookups(list, prevScene, { library, threshold, numericTolerance, excludeNames = [], minScore = 0.7, limit = 5, isSpecified = null, matcherFor = null }) {
     const scene = cloneScene(prevScene);
     const excluded = new Set(excludeNames.map(normalize).filter(Boolean));
     const lookups = [];
@@ -183,12 +183,15 @@ export function findLookups(list, prevScene, { library, threshold, numericTolera
         } else if (entry.id && scene.active.includes(entry.id)) continue; // already in the scene
         // A name the story already used (e.g. the user wrote it) is that person: only name matches, no role-only stand-ins.
         const specified = typeof isSpecified === 'function' && !!isSpecified(nm);
-        const keep = (list) => (specified ? list.filter(c => c.name >= minScore) : list);
-        let candidates = keep(identityCandidates(raw, scene.instances, { min: minScore, limit }));
+        // An extension library that claims the entry may match it its own way (e.g. enemies by what they are).
+        const own = typeof matcherFor === 'function' ? matcherFor(raw) : null;
+        const keep = (list) => (specified && !own ? list.filter(c => c.name >= minScore) : list);
+        const match = own || ((e, pool) => identityCandidates(e, pool, { min: minScore, limit }));
+        let candidates = keep(match(raw, scene.instances));
         let source = 'instance';
         if (!candidates.length) {
             const pool = unusedTemplates(scene, library);
-            candidates = keep(identityCandidates(raw, pool, { min: minScore, limit }));
+            candidates = keep(match(raw, pool));
             source = 'template';
         }
         if (candidates.length) lookups.push({ index: i, entry: raw, source, candidates, specified });

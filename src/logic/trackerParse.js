@@ -1,7 +1,7 @@
 // NPC Book — pure logic (no DOM / no SillyTavern imports). Testable in Node.
 // Finds and parses the <npcs> tracker block in a reply.
 
-import { matchBracket, parseLenientJson, salvageObjects } from './json.js';
+import { matchBracket, parseLenientJson, runsToEnd, salvageObjects } from './json.js';
 
 export const TRACKER_TAG = 'npcs';
 
@@ -44,7 +44,7 @@ export function extractTracker(text) {
     while ((m = re.exec(src)) !== null) {
         const close = matchBracket(src, m.index);
         const end = close < 0 ? src.length : close + 1;
-        arrays.push({ raw: src.slice(m.index, end), truncated: close < 0 });
+        arrays.push({ raw: src.slice(m.index, end), truncated: close < 0 && runsToEnd(src, m.index) });
         if (close < 0) break;
         re.lastIndex = end;
     }
@@ -83,8 +83,8 @@ export function extractTracker(text) {
     // 3) No usable array: a single object, a wrapper object, or tag content.
     const bodies = [...src.matchAll(/<npcs\b[^>]*>([\s\S]*?)(?:<\/npcs>|(?=<npcs\b)|$)/gi)].map(x => x[1]).reverse();
     for (const body of [...bodies, src.slice(start)]) {
-        const hit = tryParse(body, !/<\/npcs>/i.test(src.slice(start)) && matchBracket(body, body.search(/[[{]/)) < 0);
+        const hit = tryParse(body, !/<\/npcs>/i.test(src.slice(start)) && runsToEnd(body, body.search(/[[{]/)));
         if (hit) return hit;
     }
-    return { found: true, json: null, raw: src.slice(start), cleaned, removed, error: 'no readable entries', truncated: matchBracket(src, src.slice(start).search(/[[{]/) + start) < 0 };
+    return { found: true, json: null, raw: src.slice(start), cleaned, removed, error: 'no readable entries', truncated: runsToEnd(src, src.slice(start).search(/[[{]/) + start) };
 }

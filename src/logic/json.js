@@ -11,13 +11,29 @@ export function salvageObjects(text) {
     out.skipped = 0;
     out.repaired = 0;
     let depth = 0;
+    let arr = 0; // open [ inside the current entry
     let inStr = false;
     let start = -1;
     for (let i = 0; i < s.length; i++) {
         const ch = s[i];
         if (inStr) { if (ch === '\\') i++; else if (ch === '"') inStr = false; continue; }
         if (ch === '"') { inStr = true; continue; }
-        if (ch === '{') { if (depth === 0) start = i; depth++; }
+        if (ch === '{') {
+            // A new entry starting on its own line while the previous one is still open: the model left out a "}".
+            // Close the previous entry there (adding the missing braces) and start the new one.
+            if (depth > 0 && arr === 0 && start >= 0 && /[,}][ \t]*\r?\n[ \t]*$/.test(s.slice(Math.max(start, i - 40), i)) && /^\{\s*"(?:id|name|new)"\s*:/.test(s.slice(i, i + 40))) {
+                const chunk = s.slice(start, i).replace(/[\s,]*$/, '') + '}'.repeat(depth);
+                let o = null;
+                try { o = parseLenientJson(chunk); } catch { o = dropBrokenParts(chunk); }
+                if (o && typeof o === 'object' && !Array.isArray(o)) { out.push(o); out.repaired++; } else out.skipped++;
+                depth = 0;
+                arr = 0;
+            }
+            if (depth === 0) start = i;
+            depth++;
+        }
+        else if (ch === '[' && depth > 0) arr++;
+        else if (ch === ']' && depth > 0 && arr > 0) arr--;
         else if (ch === '}' && depth > 0) {
             depth--;
             if (depth === 0 && start >= 0) {
@@ -127,6 +143,23 @@ export function stripTrailingCommas(json) {
         out += ch;
     }
     return out;
+}
+
+/** True when brackets from `open` are still open at the end of the text (cut off), not closed by a wrong bracket. */
+export function runsToEnd(s, open) {
+    const stack = [];
+    let inStr = false;
+    for (let i = open; i < s.length; i++) {
+        const ch = s[i];
+        if (inStr) { if (ch === '\\') i++; else if (ch === '"') inStr = false; continue; }
+        if (ch === '"') { inStr = true; continue; }
+        if (ch === '{' || ch === '[') stack.push(ch === '{' ? '}' : ']');
+        else if (ch === '}' || ch === ']') {
+            if (stack.pop() !== ch) return false;
+            if (!stack.length) return false;
+        }
+    }
+    return true;
 }
 
 /** Index of the bracket closing the one at `open`, or -1. Double-quoted strings are skipped. */

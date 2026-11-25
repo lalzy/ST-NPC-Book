@@ -41,6 +41,11 @@ async function askMatches(list, scene, excludeNames, beforeAsk, earlierTexts) {
         numericTolerance: s.numericTolerance,
         excludeNames,
         minScore: (Number(s.nameMatch) || 70) / 100,
+        // templateLibrary.match(entry, pool) of the extension library that claims the entry, if it has one
+        matcherFor: (entry) => {
+            const m = claimingLibrary(entry)?.templateLibrary?.match;
+            return typeof m === 'function' ? (e, pool) => { try { const r = m(e, pool); return Array.isArray(r) ? r : []; } catch (err) { console.warn('[NPC Book] templateLibrary.match failed', err); return []; } } : null;
+        },
     });
     const choices = [];
     if (lookups.length) { try { beforeAsk?.(); } catch { /* cosmetic */ } }
