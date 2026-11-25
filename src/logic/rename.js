@@ -81,6 +81,8 @@ export function sanitizeSpeakerTags(text) {
             entries.push(e);
         }
         return `<npc id="${String(id).replace(/["<>]/g, '')}">`;
-    });
+    })
+        // A speaker block with nothing in it (e.g. for someone who just died) says nothing: drop it.
+        .replace(/\n?[ \t]*<npc\b[^>]*>\s*<\/npc>[ \t]*/gi, '');
     return { text: out, entries };
 }

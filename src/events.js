@@ -6,7 +6,7 @@ import { updateAutoInjection } from './prompt/injection.js';
 import { renderPmStatus } from './prompt/promptManager.js';
 import { migrateChatScenes } from './scene/migrate.js';
 import { decorateAll } from './speakers/decorate.js';
-import { onGenerationStarted, processLastMessage } from './tracking/generation.js';
+import { onGenerationStarted, onUserMessageAdded, processLastMessage } from './tracking/generation.js';
 import { processGreetings } from './tracking/greetings.js';
 import { renderLibraryList } from './ui/library/libraryList.js';
 import { closeLibrary } from './ui/library/modal.js';
@@ -16,6 +16,7 @@ import { renderRoster } from './ui/roster/rosterBar.js';
 export function registerEventHandlers() {
     const { eventSource, eventTypes } = ctx();
     eventSource.on(eventTypes.GENERATION_STARTED, onGenerationStarted);
+    if (eventTypes.USER_MESSAGE_RENDERED) eventSource.on(eventTypes.USER_MESSAGE_RENDERED, onUserMessageAdded);
     eventSource.on(eventTypes.MESSAGE_RECEIVED, (id, type) => { if (type === 'first_message') processGreetings(); else processLastMessage(); });
     const finish = () => setTimeout(() => processLastMessage(), 0);
     eventSource.on(eventTypes.GENERATION_ENDED, finish);

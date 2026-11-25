@@ -146,6 +146,18 @@ export function onGenerationStarted(type, _opts, dryRun) {
     updateAutoInjection();
 }
 
+/**
+ * The user's message is added after the generation started, and a sister extension may change the scene on it
+ * (Combat Mode takes the dead out when its summary is sent). A normal reply starts from the scene as it is then.
+ */
+export function onUserMessageAdded() {
+    const g = runtime.genCtx;
+    if (!g || g.targetIdx !== null || g.idx !== undefined) return;
+    g.pre = clone(currentScene());
+    g.preUser = clone(currentUser());
+    updateAutoInjection();
+}
+
 export async function processLastMessage() {
     const s = settings();
     if (!s.enabled || processing || !runtime.genCtx) return;
