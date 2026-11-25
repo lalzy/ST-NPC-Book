@@ -2,9 +2,11 @@
 
 import { getUserAvatar } from '../../../../../../personas.js';
 import { ctx } from '../../core/context.js';
+import { outfitCatalog } from '../../core/extHooks.js';
 import { extensions } from '../../core/runtime.js';
 import { settings } from '../../core/settings.js';
 import { clone, esc } from '../../core/utils.js';
+import { resolveOutfit } from '../../logic/outfit.js';
 import { currentUser, personaData, personaKey } from '../../scene/persona.js';
 import { writeCurrentScene } from '../../scene/roster.js';
 import { avatarHtml } from '../avatar.js';
@@ -32,8 +34,12 @@ export function openUserEditor(anchor) {
     </div>`);
     pop.on('click', '.npcb-u-ext', (e) => { const id = $(e.currentTarget).data('ext'); closePopovers(); openPersonaCharacter(`ext:${id}`); });
     pop.on('click', e => e.stopPropagation());
-    let draft = u.outfit;
-    mountPaperdoll(pop.find('.npcb-doll-host'), () => draft, (o) => { draft = o; }, () => personaData().wardrobe, () => { closePopovers(); openPersonaCharacter('wardrobe'); });
+    let draft = resolveOutfit(u.outfit, personaData().wardrobe || []);
+    mountPaperdoll(pop.find('.npcb-doll-host'), () => draft, (o) => { draft = o; }, () => {
+        const p = personaData();
+        const cat = outfitCatalog({ source: 'editor', kind: 'user', id: 'user', subject: p, ext: { ...(p.ext || {}), ...(u.ext || {}) } });
+        return { ...cat, actions: cat.actions.map(a => ({ ...a, run: () => { closePopovers(); if (a.run) a.run({ kind: 'user', id: 'user', scope: 'persona' }); else openPersonaCharacter(`ext:${a.extId}`); } })) };
+    });
     pop.on('click', '.npcb-u-save', () => {
         writeCurrentScene(null, { ...u, posture: String(pop.find('.npcb-u-posture').val() ?? ''), outfit: draft, dressed: true });
         closePopovers();

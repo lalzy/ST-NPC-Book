@@ -1,11 +1,9 @@
-// LLM assist: prompt building and answer parsing for card fields and wardrobes.
+// LLM assist: prompt building and answer parsing for card fields.
 
 import { settings } from '../../core/settings.js';
 import { parseLenientJson } from '../../logic/json.js';
-import { SLOTS, inferSlots, normalizeSlots } from '../../logic/slots.js';
 import { normColor, normalize } from '../../logic/text.js';
 import { recentStory } from '../../scene/story.js';
-import { libState } from '../library/state.js';
 import { ASSIST_FIELDS, assist, readCardEditor } from './assistState.js';
 
 export function assistJson(text) {
@@ -70,43 +68,4 @@ export function readCardAnswer(json) {
     if (!Object.keys(res).length) throw new Error('the answer did not contain any of the requested fields');
     c.result = res;
     c.accept = new Set(Object.keys(res));
-}
-
-export function buildWardrobeAssist(refine) {
-    const s = settings();
-    const w = assist.wardrobe;
-    const cur = readCardEditor();
-    const existing = (libState.draftWardrobe?.wardrobe || []).map(i => `${i.name} [${i.slots.join(', ')}]`);
-    const lines = ['CHARACTER', ...(cardContextLines(cur).length ? cardContextLines(cur) : ['(no details yet)']), ''];
-    if (w.mode === 'add' && existing.length) lines.push('ALREADY IN THE WARDROBE (do not repeat these)', existing.join('; '), '');
-    if (refine) lines.push('YOUR PREVIOUS ANSWER', JSON.stringify({ items: w.result.items.map(({ name, slots, note }) => ({ name, slots, note })) }), '', 'CHANGE REQUEST', w.prompt.trim());
-    else lines.push('REQUEST', w.prompt.trim() || '(no extra wishes: a practical, fitting everyday wardrobe)');
-    lines.push('', `Suggest about ${Math.max(1, Number(w.count) || 8)} items.`);
-    if (w.cover) lines.push('Make sure the set includes underwear (upper_inner, lower_inner), something to sleep in, and footwear.');
-    if (w.start) lines.push('Also list, in "starting", the item names this character wears right now (one per slot at most).');
-    const shape = { items: [{ name: 'Green wool dress', slots: ['upper_outer', 'lower_outer'], note: 'optional, short' }] };
-    if (w.start) shape.starting = ['Green wool dress'];
-    lines.push(`Valid slots: ${SLOTS.map(x => x.key).join(', ')}.`, '', 'Answer with exactly this JSON shape:', JSON.stringify(shape, null, 2));
-    return { systemPrompt: s.assistWardrobePrompt, prompt: lines.join('\n') };
-}
-
-export function readWardrobeAnswer(json) {
-    const w = assist.wardrobe;
-    const raw = Array.isArray(json) ? json : Array.isArray(json?.items) ? json.items : null;
-    if (!raw) throw new Error('the answer had no "items" list');
-    const owned = new Set((libState.draftWardrobe?.wardrobe || []).map(i => normalize(i.name)));
-    const items = [];
-    for (const r of raw) {
-        const name = String(typeof r === 'string' ? r : r?.name ?? '').trim();
-        if (!name || items.some(x => normalize(x.name) === normalize(name))) continue;
-        const slots = (r?.slots ?? r?.slot) ? normalizeSlots(r.slots ?? r.slot) : inferSlots(name);
-        items.push({ name, slots, note: String(r?.note ?? '').trim(), take: !owned.has(normalize(name)) });
-    }
-    if (!items.length) throw new Error('the answer had no items');
-    const starting = new Set();
-    for (const ref of Array.isArray(json?.starting) ? json.starting : []) {
-        const i = items.findIndex(x => normalize(x.name) === normalize(ref));
-        if (i >= 0) starting.add(i);
-    }
-    w.result = { items, starting };
 }

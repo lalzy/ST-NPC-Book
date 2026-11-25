@@ -1,14 +1,8 @@
-// LLM assist side panel: render, run, apply and event wiring.
+// LLM assist side panel for the Card tab: render, run, apply and event wiring.
 
 import { ctx } from '../../core/context.js';
-import { settings } from '../../core/settings.js';
 import { esc } from '../../core/utils.js';
-import { wearItem } from '../../logic/outfit.js';
-import { SLOTS } from '../../logic/slots.js';
-import { normalize, uniqueId } from '../../logic/text.js';
-import { libState } from '../library/state.js';
-import { SLOT_SHORT } from '../wardrobe/wardrobeEditor.js';
-import { assistJson, buildCardAssist, buildWardrobeAssist, readCardAnswer, readWardrobeAnswer } from './assistPrompts.js';
+import { assistJson, buildCardAssist, readCardAnswer } from './assistPrompts.js';
 import { ASSIST_FIELDS, ASSIST_TEXTAREA, assist, editorTab, isEmptyValue, libEd, readCardEditor, valueText } from './assistState.js';
 
 function markAssistTargets() {
@@ -24,13 +18,12 @@ export function renderAssist() {
     $('#npcb_library .npcb-modal-panel').toggleClass('npcb-assist-open', assist.open);
     libEd().find('.npcb-ed-assist').toggleClass('active', assist.open);
     if (!assist.open || !libEd().find('.npcb-tabs').length) { panel.hide().empty(); markAssistTargets(); return; }
-    const mode = editorTab() === 'wardrobe' ? 'wardrobe' : 'card';
-    if (mode === 'card' && !assist.card.fields) {
+    if (!assist.card.fields) {
         const cur = readCardEditor();
         const empty = ASSIST_FIELDS.filter(f => f.key !== 'color' && isEmptyValue(cur[f.key])).map(f => f.key);
         assist.card.fields = new Set(empty.length ? empty : ['details']);
     }
-    panel.show().html(mode === 'card' ? assistCardHtml() : assistWardrobeHtml());
+    panel.show().html(assistCardHtml());
     markAssistTargets();
 }
 
@@ -85,35 +78,9 @@ function assistCardHtml() {
     ${assistFoot(c, c.result ? `Apply ${n} field${n === 1 ? '' : 's'}` : '', 'Applied values go into the editor; nothing is saved until you press Save.')}`;
 }
 
-function assistWardrobeHtml() {
-    const w = assist.wardrobe;
-    const owned = new Set((libState.draftWardrobe?.wardrobe || []).map(i => normalize(i.name)));
-    let result = '<div class="npcb-empty">Describe the style you want below and press Generate. The card\'s details are used as context.</div>';
-    if (w.result) {
-        result = `<div class="npcb-assist-sec">Response · ${w.result.items.length} items</div>` + w.result.items.map((it, i) => `<div class="npcb-as-item" data-i="${i}">
-            <div class="npcb-row"><input type="checkbox" class="npcb-as-take" ${it.take ? 'checked' : ''}><input class="text_pole npcb-as-iname" value="${esc(it.name)}">${owned.has(normalize(it.name)) ? '<span class="npcb-as-owned">already owned</span>' : ''}${w.result.starting.has(i) ? '<span class="npcb-as-start" title="Starting outfit">★</span>' : ''}</div>
-            <div class="npcb-as-slots">${SLOTS.map(x => `<span class="npcb-chip ${it.slots.includes(x.key) ? 'on' : ''}" data-slot="${x.key}">${esc(SLOT_SHORT[x.key])}</span>`).join('')}<span class="npcb-chip npcb-as-slotedit" title="Change slots">✎</span></div>
-            ${it.note ? `<small class="npcb-dim">${esc(it.note)}</small>` : ''}
-        </div>`).join('');
-    }
-    const n = w.result ? w.result.items.filter(x => x.take).length : 0;
-    return `<div class="npcb-assist-head"><b><i class="fa-solid fa-wand-magic-sparkles"></i> Assist · Wardrobe</b><span class="npcb-spacer"></span><div class="menu_button npcb-as-close" title="Close"><i class="fa-solid fa-xmark"></i></div></div>
-    <div class="npcb-assist-body">
-        <div class="npcb-row">
-            <label>Items<input type="number" min="1" max="30" class="text_pole npcb-as-wopt" data-opt="count" value="${w.count}"></label>
-            <label>Mode<select class="text_pole npcb-as-wopt" data-opt="mode"><option value="add" ${w.mode === 'add' ? 'selected' : ''}>Add to wardrobe</option><option value="replace" ${w.mode === 'replace' ? 'selected' : ''}>Replace wardrobe</option></select></label>
-        </div>
-        <label class="checkbox_label"><input type="checkbox" class="npcb-as-wopt" data-opt="cover" ${w.cover ? 'checked' : ''}> Cover the basics (underwear, sleepwear, footwear)</label>
-        <label class="checkbox_label"><input type="checkbox" class="npcb-as-wopt" data-opt="start" ${w.start ? 'checked' : ''}> Also pick a starting outfit (★)</label>
-        ${result}
-    </div>
-    ${assistFoot(w, w.result ? `${w.mode === 'replace' ? 'Replace with' : 'Add'} ${n} item${n === 1 ? '' : 's'}` : '', 'Items go into the wardrobe editor; nothing is saved until you press Save.')}`;
-}
-
 async function runAssist(refine) {
     if (assist.busy) return;
-    const mode = editorTab() === 'wardrobe' ? 'wardrobe' : 'card';
-    const st = assist[mode];
+    const st = assist.card;
     if (refine && (!st.result || !st.prompt.trim())) { toastr.info('Write what to change in the prompt box, then press Refine.', 'NPC Book'); return; }
     const owner = assist.owner;
     const run = {};
@@ -121,11 +88,11 @@ async function runAssist(refine) {
     assist.busy = true;
     renderAssist();
     try {
-        const { systemPrompt, prompt } = mode === 'card' ? buildCardAssist(refine) : buildWardrobeAssist(refine);
+        const { systemPrompt, prompt } = buildCardAssist(refine);
         const answer = await ctx().generateRaw({ systemPrompt, prompt });
         if (assist.run !== run || assist.owner !== owner) return; // stopped, or switched NPC meanwhile
         const json = assistJson(answer);
-        if (mode === 'card') readCardAnswer(json); else readWardrobeAnswer(json);
+        readCardAnswer(json);
     } catch (e) {
         if (assist.run !== run) return; // stopped by the user
         console.warn('[NPC Book] assist failed', e);
@@ -166,34 +133,6 @@ function applyCardAssist() {
     toastr.success(`Applied ${n} field${n === 1 ? '' : 's'}. Press Save to keep them.`, 'NPC Book');
 }
 
-function applyWardrobeAssist() {
-    const w = assist.wardrobe;
-    const d = libState.draftWardrobe;
-    if (!w.result || !d) return;
-    const s = settings();
-    if (w.mode === 'replace') { d.wardrobe = []; d.defaultWorn = []; }
-    const newIds = new Map();
-    let n = 0;
-    w.result.items.forEach((it, i) => {
-        if (!it.take || !it.name.trim()) return;
-        const have = d.wardrobe.find(x => normalize(x.name) === normalize(it.name));
-        if (have) { newIds.set(i, have.id); return; }
-        const id = uniqueId(it.name, x => d.wardrobe.some(y => y.id === x));
-        d.wardrobe.push({ id, name: it.name.trim(), slots: it.slots.length ? it.slots : ['other'], note: it.note });
-        newIds.set(i, id);
-        n++;
-    });
-    if (w.start && w.result.starting.size) {
-        let worn = w.mode === 'replace' ? [] : d.defaultWorn.map(id => ({ id }));
-        for (const i of w.result.starting) if (newIds.has(i)) worn = wearItem(worn, d.wardrobe, newIds.get(i), s.conditions[0]).outfit;
-        d.defaultWorn = worn.map(x => x.id);
-    }
-    w.result = null;
-    libState.wardrobeUi?.refresh();
-    libEd().find('.npcb-tab[data-tab="wardrobe"]').text(`Wardrobe (${d.wardrobe.length})`);
-    toastr.success(`${w.mode === 'replace' ? 'Wardrobe replaced' : 'Added'}: ${n} item${n === 1 ? '' : 's'}. Press Save to keep them.`, 'NPC Book');
-}
-
 export function bindAssist(modal) {
     modal.on('click', '.npcb-ed-assist', () => { assist.open = !assist.open; renderAssist(); });
     const panel = modal.find('.npcb-assist');
@@ -206,17 +145,12 @@ export function bindAssist(modal) {
         markAssistTargets();
     });
     panel.on('change', '.npcb-as-opt', (e) => { assist.card[$(e.target).data('opt')] = e.target.checked; });
-    panel.on('input change', '.npcb-as-wopt', (e) => {
-        const k = $(e.target).data('opt');
-        assist.wardrobe[k] = e.target.type === 'checkbox' ? e.target.checked : k === 'count' ? Number(e.target.value) : String(e.target.value);
-        if (k === 'mode' && assist.wardrobe.result) renderAssist();
-    });
-    panel.on('input', '.npcb-as-prompt', (e) => { assist[editorTab() === 'wardrobe' ? 'wardrobe' : 'card'].prompt = String(e.target.value); });
+    panel.on('input', '.npcb-as-prompt', (e) => { assist.card.prompt = String(e.target.value); });
     panel.on('keydown', '.npcb-as-prompt', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runAssist(false); } });
     panel.on('click', '.npcb-as-gen', () => runAssist(false));
     panel.on('click', '.npcb-as-stop', stopAssist);
     panel.on('click', '.npcb-as-refine', () => runAssist(true));
-    panel.on('click', '.npcb-as-apply', () => { if (assist.busy) return; if (editorTab() === 'wardrobe') applyWardrobeAssist(); else applyCardAssist(); renderAssist(); });
+    panel.on('click', '.npcb-as-apply', () => { if (assist.busy) return; applyCardAssist(); renderAssist(); });
     // card proposals
     panel.on('change', '.npcb-as-accept', (e) => {
         const k = $(e.target).closest('.npcb-as-prop').data('field');
@@ -229,24 +163,5 @@ export function bindAssist(modal) {
         if (!r) return;
         const k = $(e.target).data('field');
         if (k === 'identity') r.identity[$(e.target).data('key')] = String(e.target.value); else r[k] = String(e.target.value);
-    });
-    // wardrobe proposals
-    const itemAt = (el) => assist.wardrobe.result?.items[Number($(el).closest('.npcb-as-item').data('i'))];
-    panel.on('change', '.npcb-as-take', (e) => {
-        const it = itemAt(e.target);
-        if (!it) return;
-        it.take = e.target.checked;
-        const n = assist.wardrobe.result.items.filter(x => x.take).length;
-        panel.find('.npcb-as-apply').text(`${assist.wardrobe.mode === 'replace' ? 'Replace with' : 'Add'} ${n} item${n === 1 ? '' : 's'}`);
-    });
-    panel.on('input', '.npcb-as-iname', (e) => { const it = itemAt(e.target); if (it) it.name = String(e.target.value); });
-    panel.on('click', '.npcb-as-slotedit', (e) => { $(e.currentTarget).closest('.npcb-as-slots').toggleClass('open'); });
-    panel.on('click', '.npcb-as-slots .npcb-chip[data-slot]', (e) => {
-        const it = itemAt(e.target);
-        if (!it) return;
-        const k = $(e.currentTarget).data('slot');
-        it.slots = it.slots.includes(k) ? it.slots.filter(x => x !== k) : [...it.slots, k];
-        if (!it.slots.length) it.slots = [k];
-        $(e.currentTarget).closest('.npcb-as-slots').find('.npcb-chip').each((_, c) => $(c).toggleClass('on', it.slots.includes($(c).data('slot'))));
     });
 }

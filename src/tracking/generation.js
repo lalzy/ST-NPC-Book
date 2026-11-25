@@ -4,13 +4,13 @@ import { MODULE } from '../constants.js';
 import { ctx, excludedNames } from '../core/context.js';
 import { newNpcFolder, registerFolder } from '../core/folders.js';
 import { pickColor } from '../core/npcs.js';
+import { outfitCatalog, runEntryHooks, transformEntries } from '../core/extHooks.js';
 import { extensions, runtime } from '../core/runtime.js';
 import { lib, save, settings } from '../core/settings.js';
 import { clone, sig } from '../core/utils.js';
 import { attachInstance, cloneScene, toScene } from '../logic/instances.js';
 import { resolveRef } from '../logic/matching.js';
-import { applyOutfitChange, normOutfitChange } from '../logic/outfit.js';
-import { relationshipTypeNames } from '../logic/relationships.js';
+import { applyOutfitChange, normOutfitChange, resolveOutfit } from '../logic/outfit.js';
 import { normalize, pickEnum } from '../logic/text.js';
 import { applyTracker } from '../logic/trackerApply.js';
 import { extractTracker } from '../logic/trackerParse.js';
@@ -107,31 +107,38 @@ export async function processLastMessage() {
             if (ex.json) {
                 const excludeNames = excludedNames();
                 const isUserEntry = (e) => e && typeof e === 'object' && (String(e.id ?? '').toLowerCase() === 'user' || (c.name1 && normalize(e.name) === normalize(c.name1)));
-                const userEntry = ex.json.find(isUserEntry);
+                // Sister extensions may rewrite or drop entries first (transformEntry); without any, this is ex.json itself.
+                const entries = transformEntries(ex.json, { source: 'tracker', messageIndex: idx });
+                const userEntry = entries.find(isUserEntry);
                 if (userEntry && s.trackUser) {
                     const p = personaData();
                     const u = clone(postUser);
                     u.posture = pickEnum(userEntry.posture, s.postures, u.posture);
                     if (s.trackOutfits) {
-                        const oc = applyOutfitChange(u.outfit, p.wardrobe, normOutfitChange(userEntry), s.conditions);
+                        const cat = outfitCatalog({ source: 'tracker', kind: 'user', id: 'user', subject: p, ext: { ...(p.ext || {}), ...(u.ext || {}) } });
+                        const oc = applyOutfitChange(resolveOutfit(u.outfit, p.wardrobe || []), normOutfitChange(userEntry), { conditions: s.conditions, catalog: cat.items, strict: cat.strict });
                         u.outfit = oc.outfit;
                         if (userEntry.outfit || userEntry.wear) u.dressed = true;
                     }
                     postUser = u;
                 }
+                // Sister extensions read the user's entry into this chat's copy of their persona data (rolls back with swipes).
+                if (userEntry) {
+                    const u = clone(postUser);
+                    let touched = false;
+                    runEntryHooks({ kind: 'user', source: 'tracker', id: 'user', name: c.name1, entry: userEntry, isNew: false, user: u },
+                        (x) => u.ext?.[x] ?? personaData().ext?.[x],
+                        (x, d) => { u.ext = u.ext || {}; u.ext[x] = d; touched = true; });
+                    if (touched) postUser = u;
+                }
                 // The block lists changes, so apply it to the scene as it stood before this text was written.
-                const r = applyTracker(ex.json.filter(e => !isUserEntry(e)), post, {
+                const r = applyTracker(entries.filter(e => !isUserEntry(e)), post, {
                     library: lib(),
                     threshold: s.threshold / 100,
                     numericTolerance: s.numericTolerance,
                     postures: s.postures,
                     states: s.states,
                     conditions: s.conditions,
-                    allowWardrobeGrowth: s.allowWardrobeGrowth,
-                    trackRelationships: s.trackRelationships,
-                    attitudes: s.attitudes,
-                    relationshipTypes: relationshipTypeNames(s.relationshipTypes),
-                    userName: c.name1,
                     autoCreate: s.autoCreate,
                     maxNew: Number(s.maxNewPerReply) || 0,
                     traitKeys: s.traitKeys,
@@ -146,6 +153,14 @@ export async function processLastMessage() {
                             try { const d = ext.fromTracker(entry, t); if (d) { t.ext = t.ext || {}; t.ext[ext.id] = d; } } catch (e) { console.warn(`[NPC Book] ${ext.id} fromTracker failed`, e); }
                         }
                     },
+                    // Sister extensions read every entry into their data on this chat's instance (rolls back with swipes).
+                    onEntry: (inst, entry, { isNew }, scene) => runEntryHooks(
+                        { kind: 'char', source: 'tracker', id: inst.id, name: inst.name, entry, isNew, instance: inst, scene },
+                        (x) => inst.ext?.[x],
+                        (x, d) => { inst.ext = inst.ext || {}; inst.ext[x] = d; }),
+                    // Known clothing (e.g. a sister extension's wardrobe); without one, any clothing can be worn.
+                    catalogFor: (inst) => (s.trackOutfits ? outfitCatalog({ source: 'tracker', kind: 'char', id: inst.id, subject: inst, ext: inst.ext || {} }) : { items: [], strict: false }),
+                    onCreate: instanceOpts().onCreate,
                 });
                 for (const t of r.created) lib()[t.id] = t;
                 if (r.skipped?.length) {
@@ -165,7 +180,7 @@ export async function processLastMessage() {
                     toastr.info(`New NPC${r.created.length > 1 ? 's' : ''}: ${r.created.map(t => `${t.name} (${t.id})`).join(', ')}`, 'NPC Book');
                     renderLibraryList();
                 }
-                for (const l of r.log.filter(x => x.action === 'wardrobe-added')) toastr.info(`${l.name} got: ${l.items.join(', ')}`, 'NPC Book');
+
                 post = r.scene;
                 trackLog = r.log.map(l => `${l.action}: ${l.name ?? l.id ?? ''}${l.id && l.name && l.id !== l.name ? ` (${l.id})` : ''}${l.items ? ` [${l.items.join(', ')}]` : ''}`);
             } else {

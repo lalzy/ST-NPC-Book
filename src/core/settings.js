@@ -1,6 +1,6 @@
 // Extension settings: load with defaults and migrations, save, and the NPC library stored in them.
 
-import { DEFAULTS, DEFAULT_INSTRUCTIONS, DEFAULT_INSTRUCTIONS_V1, DEFAULT_PORTRAIT_LLM_PROMPT, DEFAULT_PORTRAIT_LLM_PROMPT_V1, DEFAULT_RELATIONSHIP_RULE, DEFAULT_RELATIONSHIP_RULE_V1, DEFAULT_RELATIONSHIP_TYPES_V1, MODULE } from '../constants.js';
+import { DEFAULTS, DEFAULT_INSTRUCTIONS, DEFAULT_INSTRUCTIONS_V1, DEFAULT_INSTRUCTIONS_V2, DEFAULT_OUTFIT_RULES, DEFAULT_OUTFIT_RULES_V2, DEFAULT_PORTRAIT_LLM_PROMPT, DEFAULT_PORTRAIT_LLM_PROMPT_V1, MODULE } from '../constants.js';
 import { ctx } from './context.js';
 
 export function settings() {
@@ -21,14 +21,9 @@ export function settings() {
     if (JSON.stringify(s.traitKeys) === JSON.stringify(['age', 'gender', 'role'])) s.traitKeys = ['race', 'age', 'gender', 'role'];
     if (!s.portraitTemplateV2 && s.portraitLlmPrompt === DEFAULT_PORTRAIT_LLM_PROMPT_V1) s.portraitLlmPrompt = DEFAULT_PORTRAIT_LLM_PROMPT;
     s.portraitTemplateV2 = true;
-    if (JSON.stringify(s.relationshipTypes) === JSON.stringify(DEFAULT_RELATIONSHIP_TYPES_V1)) s.relationshipTypes = structuredClone(DEFAULTS.relationshipTypes);
-    // Unedited copies of the first relationship rule move to the one that enforces the type list.
-    if (typeof s.relationshipRule === 'string' && s.relationshipRule.trim() === DEFAULT_RELATIONSHIP_RULE_V1.trim()) s.relationshipRule = DEFAULT_RELATIONSHIP_RULE;
+    // Relationship and wardrobe settings now belong to their sister extensions, which read (and migrate) them from here.
     // Unedited copies of the previous default tracking prompt follow the new default; edited ones are left alone.
     if (typeof s.instructions === 'string' && s.instructions.trim() === DEFAULT_INSTRUCTIONS_V1.trim()) s.instructions = DEFAULT_INSTRUCTIONS;
-    // New clothing used to be ignored by default. Now that it only ever goes into a chat's own NPC instance, it is on;
-    // switched on once for existing installs, after which the checkbox is respected.
-    if (!s.wardrobeGrowthV2) { s.allowWardrobeGrowth = true; s.wardrobeGrowthV2 = true; }
     if (typeof s.instructions === 'string' && !s.instructions.includes('"sexual_experience"')) {
         s.instructions = s.instructions.replace(
             'plus "description" (one line) and "details" (full profile: appearance, personality, background, manner of speech).',
@@ -38,6 +33,9 @@ export function settings() {
     if (typeof s.instructions === 'string' && !s.instructions.includes('[[USER_EXAMPLE]]')) {
         s.instructions = s.instructions.replace('"feelings": "..."}\n]', '"feelings": "...", "outfit": {"wear": ["item_id"], "remove": ["item_id"]}}[[USER_EXAMPLE]]\n]');
     }
+    // Wardrobes moved to a sister extension: unedited copies of the wardrobe-era prompts follow the new defaults.
+    if (typeof s.instructions === 'string' && s.instructions.trim() === DEFAULT_INSTRUCTIONS_V2.trim()) s.instructions = DEFAULT_INSTRUCTIONS;
+    if (typeof s.outfitRules === 'string' && s.outfitRules.trim() === DEFAULT_OUTFIT_RULES_V2.trim()) s.outfitRules = DEFAULT_OUTFIT_RULES;
     return s;
 }
 export const save = () => ctx().saveSettingsDebounced();

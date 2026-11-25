@@ -16,7 +16,6 @@ export const ASSIST_TEXTAREA = new Set(['description', 'details']);
 export const assist = {
     open: false, busy: false, owner: null, run: null,
     card: { fields: null, useCard: true, useChat: false, prompt: '', result: null, accept: new Set() },
-    wardrobe: { count: 8, mode: 'add', cover: true, start: false, prompt: '', result: null },
 };
 
 export const libEd = () => $('#npcb_library .npcb-lib-editor');
@@ -43,5 +42,4 @@ export function resetAssistFor(owner) {
     assist.owner = owner;
     assist.card.fields = null;
     assist.card.result = null;
-    assist.wardrobe.result = null;
 }

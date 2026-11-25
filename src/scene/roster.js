@@ -3,6 +3,7 @@
 
 import { MODULE } from '../constants.js';
 import { ctx, hasChat, meta } from '../core/context.js';
+import { instanceCreated } from '../core/extHooks.js';
 import { runtime } from '../core/runtime.js';
 import { lib, settings } from '../core/settings.js';
 import { clone } from '../core/utils.js';
@@ -15,10 +16,10 @@ export function snapOf(msg) { return msg?.extra?.[MODULE] ?? null; }
 
 const hasScene = (s) => !!s && s.post !== undefined && s.post !== null;
 
-/** Options for creating an instance from a template (starting posture / state / outfit condition). */
+/** Options for creating an instance from a template (starting posture / state / outfit condition, extension setup). */
 export function instanceOpts() {
     const s = settings();
-    return { postures: s.postures, states: s.states, conditions: s.conditions };
+    return { postures: s.postures, states: s.states, conditions: s.conditions, onCreate: instanceCreated };
 }
 
 /** Scene as of the end of the chat (latest message snapshot, else chat base). */

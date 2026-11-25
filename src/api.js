@@ -1,39 +1,135 @@
 // Public API for sister extensions (window.NPCBook) and the npcbook:ready event.
 
+import { getUserAvatar } from '../../../../personas.js';
+import { SLOT_LABEL } from './constants.js';
 import { ctx, hasChat } from './core/context.js';
 import { extensions } from './core/runtime.js';
-import { lib, save } from './core/settings.js';
-import { esc, indent, xa, xt } from './core/utils.js';
+import { lib, save, settings } from './core/settings.js';
+import { clone, esc, indent, initials, xa, xt } from './core/utils.js';
+import { cloneScene } from './logic/instances.js';
+import { parseLenientJson } from './logic/json.js';
 import { resolveRef } from './logic/matching.js';
-import { normalize, slugify } from './logic/text.js';
+import { applyClothing, exposureSummary, findItem, findItemLoose, makeItem, outfitBySlot, resolveOutfit, wearItem } from './logic/outfit.js';
+import { SLOTS, STACKING_SLOTS, inferSlots, normalizeSlot, normalizeSlots } from './logic/slots.js';
+import { cleanId, normalize, pickEnum, slugify, uniqueId } from './logic/text.js';
 import { updateAutoInjection } from './prompt/injection.js';
-import { personaData } from './scene/persona.js';
-import { currentRoster, findInstance, rosterAtMessage } from './scene/roster.js';
+import { currentUser, personaData, personaKey } from './scene/persona.js';
+import { currentScene, currentRoster, findInstance, promptScene, rosterAtMessage, writeCurrentScene } from './scene/roster.js';
+import { avatarHtml } from './ui/avatar.js';
+import { injectStyle } from './ui/injectStyle.js';
 import { selectTemplate } from './ui/library/editor.js';
+import { openTemplateExtSheet } from './ui/library/extSheet.js';
+import { openLibrary } from './ui/library/modal.js';
 import { libState } from './ui/library/state.js';
 import { openPersonaCharacter } from './ui/persona/personaCharacter.js';
+import { closePopovers, placePopover } from './ui/popover.js';
+import { openInstanceEditor } from './ui/roster/instanceEditor.js';
+import { openInstanceExtSheet } from './ui/roster/instanceExtSheet.js';
 import { renderRoster } from './ui/roster/rosterBar.js';
+import { bindTabs } from './ui/tabs.js';
+
+/** API version. 6 added: onTrackerEntry, transformEntry, entryKeys, placeholders, transformInstructions, transformScene,
+ *  unregisterExtension, getExtData, setExtData, getUser, refreshPrompts. 7 added: outfitCatalog, onInstanceCreate,
+ *  cardTab/personaSheet onSave, render ctx id/scope, sceneXml scene/sceneIds, onTrackerEntry scene, clothing, ui,
+ *  getChatScene, getPromptScene, getSettings, openSheet. Full contract: EXTENDING.md. */
+export const API_VERSION = 8;
+
+/** Open an extension's sheet for one character in a popup. scope: 'instance' (this chat), 'template' (card), 'persona'. */
+function openSheet(ref, extId, { scope = 'instance' } = {}) {
+    if (scope === 'persona' || scope === 'user') return openPersonaCharacter(`ext:${extId}`);
+    if (scope === 'template') { const id = resolveRef(ref, lib()); return id ? openTemplateExtSheet(id, extId) : undefined; }
+    const inst = hasChat() ? findInstance(ref) : null;
+    return inst ? openInstanceExtSheet(inst.id, extId) : undefined;
+}
+
+/** Open an NPC card in the Library window (on a tab: 'card', 'outfit' or 'ext:<id>'). */
+function openCard(id, tab = 'card') {
+    if ($('#npcb_library').is(':visible')) selectTemplate(id, false, tab);
+    else openLibrary(id, false, tab);
+}
+
+function refreshOpenEditor() {
+    if ($('#npcb_library').is(':visible') && (libState.selected || libState.isNew)) selectTemplate(libState.selected, libState.isNew);
+}
+
+/** Read one extension's data for a character. scope: 'instance' (this chat's NPC), 'template' (library card), 'persona', 'user'. */
+function getExtData(ref, extId, { scope = 'instance' } = {}) {
+    if (scope === 'persona') return clone(personaData().ext?.[extId] ?? null);
+    if (scope === 'user') return hasChat() ? clone(currentUser().ext?.[extId] ?? personaData().ext?.[extId] ?? null) : null;
+    if (scope === 'template') { const id = resolveRef(ref, lib()); return clone(id ? lib()[id]?.ext?.[extId] ?? null : null); }
+    if (!hasChat()) return null;
+    return clone(findInstance(ref)?.ext?.[extId] ?? null);
+}
+
+/** Write (and save) one extension's data for a character. Same scopes as getExtData. Returns true when written. */
+function setExtData(ref, extId, data, { scope = 'instance' } = {}) {
+    if (!extId) throw new Error('setExtData: extId required');
+    const value = clone(data);
+    if (scope === 'persona') {
+        const p = personaData();
+        p.ext = { ...(p.ext || {}), [extId]: value };
+        save();
+        renderRoster();
+        return true;
+    }
+    if (scope === 'user') {
+        if (!hasChat()) return false;
+        const u = clone(currentUser());
+        u.ext = { ...(u.ext || {}), [extId]: value };
+        writeCurrentScene(null, u);
+        return true;
+    }
+    if (scope === 'template') {
+        const id = resolveRef(ref, lib());
+        const t = id ? lib()[id] : null;
+        if (!t) return false;
+        t.ext = { ...(t.ext || {}), [extId]: value };
+        save();
+        updateAutoInjection();
+        return true;
+    }
+    if (!hasChat()) return false;
+    const scene = cloneScene(currentScene());
+    const inst = findInstance(ref, scene);
+    if (!inst) return false;
+    inst.ext = { ...(inst.ext || {}), [extId]: value };
+    writeCurrentScene(scene);
+    return true;
+}
 
 export function exposePublicApi() {
     window.NPCBook = {
-        version: 5,
+        version: API_VERSION,
+        apiVersion: API_VERSION,
         /**
-         * Register a sister extension.
-         * def = { id, label?, defaultData?(), cardTab?: { label, render(host, {data, template, isNew, kind}) },
-         *         personaSheet?: { label, icon?, render(host, {data, kind, name}) },
+         * Register a sister extension. Every member except id is optional. See EXTENDING.md for the full contract.
+         * def = { id, label?, defaultData?(),
+         *         cardTab?: { label, icon?, render(host, {data, template, isNew, kind}) },
+         *         personaSheet?: { label, icon?, render(host, {data, kind, name}) }, sheetLabel?,
          *         sceneXml?({kind, name, id, template, instance, data}) -> string,
-         *         instructions?({autoCreate}) -> string, fromTracker?(entry, template) -> data,
+         *         instructions?({autoCreate}) -> string, placeholders?: { KEY: () -> string },
+         *         fromTracker?(entry, template) -> data,
+         *         onTrackerEntry?({kind, source, id, name, entry, data, isNew, instance?}) -> data | undefined,
+         *         transformEntry?(entry, {source, messageIndex}) -> entry | null | undefined, entryKeys?: [string],
+         *         transformInstructions?(text, info) -> text, transformScene?(text, info) -> text,
          *         sceneButton?: { icon() -> 'fa-…', title() -> string, active?() -> bool, onClick(anchorEl) } }
          * sceneButton adds an icon to the scene bar head (next to Add NPC / Folder); active() === false dims it.
          * Call refreshScene() after changing what it shows.
          * Card/persona `data` objects are mutable drafts; NPC Book saves them when the user presses Save.
+         * Registering the same id again replaces the earlier definition.
          */
         registerExtension(def) {
             if (!def?.id) throw new Error('registerExtension: id required');
             extensions.set(def.id, def);
-            if ($('#npcb_library').is(':visible') && (libState.selected || libState.isNew)) selectTemplate(libState.selected, libState.isNew);
+            refreshOpenEditor();
             renderRoster();
             updateAutoInjection();
+        },
+        /** Remove a registered extension. Its stored data is kept. Returns true when it was registered. */
+        unregisterExtension(id) {
+            const had = extensions.delete(id);
+            if (had) { refreshOpenEditor(); renderRoster(); updateAutoInjection(); }
+            return had;
         },
         /** Redraw the scene bar (and its sister-extension buttons) and refresh injected prompts. */
         refreshScene: () => renderRoster(),
@@ -55,9 +151,30 @@ export function exposePublicApi() {
         getInstance: (ref) => (hasChat() ? findInstance(ref) : null),
         /** Resolve an id or name (as written by the LLM in <npc id="…">): this chat's instance first, then the library. */
         resolveNpc: (ref) => (hasChat() ? findInstance(ref)?.id : null) ?? resolveRef(ref, lib()),
+        /** This chat's user state (posture, outfit, and `ext` once an extension wrote per-chat user data), or null. */
+        getUser: () => (hasChat() ? clone(currentUser()) : null),
+        getExtData,
+        setExtData,
+        /** Rebuild the injected prompts (after your sceneXml / instructions / placeholders would give different text). */
+        refreshPrompts: () => updateAutoInjection(),
+        /** The open chat's scene as stored now: { instances: {id: instance}, active: [id] } (read only), or null. */
+        getChatScene: () => (hasChat() ? currentScene() : null),
+        /** The scene the next prompt describes (during a swipe: the one before the reply being replaced). Read only. */
+        getPromptScene: () => (hasChat() ? promptScene() : null),
+        /** NPC Book's own settings (read only): postures, states, conditions, traitKeys, … */
+        getSettings: () => settings(),
+        openSheet,
         openPersonaCharacter,
         saveSettings: save,
-        util: { esc, xa, xt, normalize, slugify, indent },
+        util: { esc, xa, xt, normalize, slugify, indent, clone, uniqueId, pickEnum, cleanId, initials, parseJson: parseLenientJson },
+        /** Clothing model shared by the paperdoll, the tracker and sister extensions (items: {id, name, slots, condition?, note?}). */
+        clothing: { SLOTS, SLOT_LABEL, STACKING_SLOTS, inferSlots, normalizeSlot, normalizeSlots, findItem, findItemLoose, makeItem, wearItem, outfitBySlot, resolveOutfit, applyClothing, exposureSummary },
+        /** NPC Book's UI building blocks, so sister extensions look the same without copying them. */
+        ui: {
+            avatarHtml, injectStyle, bindTabs, closePopovers, placePopover, openCard, openInstanceEditor,
+            /** Your persona's avatar URL ('' when none). */
+            personaAvatar: () => (personaKey() ? getUserAvatar(personaKey()) : ''),
+        },
     };
     document.dispatchEvent(new CustomEvent('npcbook:ready', { detail: window.NPCBook }));
 }

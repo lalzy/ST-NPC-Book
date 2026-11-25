@@ -3,41 +3,35 @@
 import { SLOT_LABEL } from '../constants.js';
 import { ctx, hasChat } from '../core/context.js';
 import { profileOf } from '../core/npcs.js';
+import { pipe } from '../core/extHooks.js';
 import { extensions } from '../core/runtime.js';
 import { settings } from '../core/settings.js';
 import { indent, xa, xt } from '../core/utils.js';
-import { exposureSummary, findItem } from '../logic/outfit.js';
+import { exposureSummary, resolveOutfit } from '../logic/outfit.js';
 import { PROFILE_FIELDS } from '../logic/profile.js';
-import { USER_REF } from '../logic/relationships.js';
 import { normalize } from '../logic/text.js';
 import { personaData, personaDescription, promptUser } from '../scene/persona.js';
 import { promptRoster, promptScene } from '../scene/roster.js';
 
-function wearingText(outfit, wardrobe) {
+function wearingText(outfit) {
     const s = settings();
     const def = s.conditions[0];
     const parts = (outfit || []).map(w => {
-        const it = findItem(wardrobe, w.id);
-        if (!it) return null;
         const cond = w.condition && w.condition !== def ? ` (${w.condition})` : '';
-        return `${it.slots.map(k => SLOT_LABEL[k] || k).join(' + ')}: ${it.name}${cond}`;
-    }).filter(Boolean);
+        return `${(w.slots || []).map(k => SLOT_LABEL[k] || k).join(' + ')}: ${w.name}${cond}`;
+    });
     return parts.length ? parts.join('; ') : 'nothing';
 }
 
-function wardrobeText(wardrobe) {
-    if (!wardrobe?.length) return '';
-    return wardrobe.map(i => `${i.id} = ${i.name} [${i.slots.map(k => SLOT_LABEL[k] || k).join(', ')}]${i.note ? ` (${i.note})` : ''}`).join('; ');
-}
-
-function outfitXml(outfit, wardrobe) {
+/** <wearing> for a character: what they have on now (self-contained items; older saves resolve through `legacyWardrobe`). */
+function outfitXml(outfit, legacyWardrobe, dressed = false) {
     const s = settings();
     if (!s.trackOutfits) return [];
-    if (!wardrobe?.length && !(outfit || []).length) return [];
-    const exp = s.describeExposure ? exposureSummary(outfit, wardrobe) : '';
-    const out = [`<wearing${exp ? ` exposure="${xa(exp)}"` : ''}>${xt(wearingText(outfit, wardrobe))}</wearing>`];
-    if (s.includeWardrobe) { const wt = wardrobeText(wardrobe); if (wt) out.push(`<wardrobe>${xt(wt)}</wardrobe>`); }
-    return out;
+    const worn = resolveOutfit(outfit, legacyWardrobe || []);
+    // Someone whose clothing was never set (no outfit, never dressed or undressed) gets no <wearing> line.
+    if (!worn.length && !dressed && !(legacyWardrobe || []).length) return [];
+    const exp = s.describeExposure ? exposureSummary(worn) : '';
+    return [`<wearing${exp ? ` exposure="${xa(exp)}"` : ''}>${xt(wearingText(worn))}</wearing>`];
 }
 
 /** XML contributed by sister extensions for one subject. */
@@ -46,9 +40,12 @@ function extXml(subject) {
     for (const ext of extensions.values()) {
         if (typeof ext.sceneXml !== 'function') continue;
         try {
-            const data = subject.kind === 'user' ? personaData().ext?.[ext.id] : subject.template?.ext?.[ext.id];
-            if (!data) continue;
-            const xml = ext.sceneXml({ ...subject, data });
+            // sceneXmlAlways: also called for characters without data for this extension (e.g. to read older data).
+            // The user's data: this chat's copy (written by onTrackerEntry / setExtData), else the persona sheet.
+            const data = subject.kind === 'user' ? (promptUser().ext?.[ext.id] ?? personaData().ext?.[ext.id]) : subject.template?.ext?.[ext.id];
+            if (!data && !ext.sceneXmlAlways) continue;
+            const scene = promptScene();
+            const xml = ext.sceneXml({ ...subject, data, scene, sceneIds: [...scene.active] });
             if (xml && String(xml).trim()) out.push(String(xml).trim());
         } catch (e) { console.warn(`[NPC Book] extension ${ext.id} sceneXml failed`, e); }
     }
@@ -64,9 +61,9 @@ function buildUserBlock() {
         const u = promptUser();
         const p = personaData();
         if (u.posture) inner.push(`<state posture="${xa(u.posture)}"/>`);
-        inner.push(...outfitXml(u.outfit, p.wardrobe));
+        inner.push(...outfitXml(u.outfit, p.wardrobe, !!u.dressed));
     }
-    inner.push(...extXml({ kind: 'user', name: c.name1 }));
+    inner.push(...extXml({ kind: 'user', name: c.name1, subject: personaData(), user: promptUser() }));
     if (!inner.length) return '';
     return [`<user name="${xa(c.name1)}">`, ...inner.map(x => indent(x, 2)), '</user>'].join('\n');
 }
@@ -92,23 +89,6 @@ function dialogueExamplesFor(t, inst) {
     return out;
 }
 
-/**
- * An NPC's relationships for the prompt (when tracking them is on): only those with you and with characters
- * in the scene right now, to keep the context small. Names come from the chat's own NPCs.
- */
-function relationshipsXml(inst) {
-    const s = settings();
-    if (!s.trackRelationships) return [];
-    const scene = promptScene();
-    const rels = (inst.relationships || []).filter(r => r?.to && (r.to === USER_REF || scene.active.includes(r.to)));
-    if (!rels.length) return [];
-    const nameOf = (to) => (to === USER_REF ? ctx().name1 : scene.instances[to]?.name ?? to);
-    return [['<relationships>', ...rels.map(r => {
-        const attrs = ` to="${xa(r.to)}" name="${xa(nameOf(r.to))}"${r.type ? ` type="${xa(r.type)}"` : ''}${r.attitude ? ` attitude="${xa(r.attitude)}"` : ''}`;
-        return indent(r.note ? `<rel${attrs}>${xt(r.note)}</rel>` : `<rel${attrs}/>`, 2);
-    }), '</relationships>'].join('\n')];
-}
-
 /** One NPC's <char> block, built from the chat's instance only (it carries its own card fields, wardrobe and ext data). */
 function buildCharBlock(inst) {
     const s = settings();
@@ -123,14 +103,13 @@ function buildCharBlock(inst) {
     if (details) inner.push(`<details>${xt(details)}</details>`);
     const examples = dialogueExamplesFor(t, inst);
     if (examples.length) inner.push(['<dialogue_examples>', ...examples.map(e => indent(`<example${e.when ? ` when="${xa(e.when)}"` : ''}>${xt(e.text)}</example>`, 2)), '</dialogue_examples>'].join('\n'));
-    inner.push(...relationshipsXml(inst));
     const stAttrs = [
         inst.posture && `posture="${xa(inst.posture)}"`,
         inst.state && `mood="${xa(inst.state)}"`,
     ].filter(Boolean).join(' ');
     if (stAttrs) inner.push(`<state ${stAttrs}/>`);
     if (inst.feelings) inner.push(`<feelings>${xt(inst.feelings)}</feelings>`);
-    inner.push(...outfitXml(inst.outfit, t?.wardrobe));
+    inner.push(...outfitXml(inst.outfit, t?.wardrobe, !!inst.dressed));
     inner.push(...extXml({ kind: 'char', name, id: inst.id, template: t, instance: inst }));
     return [`<char name="${xa(name)}" id="${xa(inst.id)}">`, ...inner.map(x => indent(x, 2)), '</char>'].join('\n');
 }
@@ -145,5 +124,6 @@ export function buildSceneText() {
     if (s.sceneHeader) parts.push(s.sceneHeader);
     if (userBlock) parts.push(userBlock);
     if (roster.length) parts.push(['<characters>', ...roster.map(buildCharBlock), '</characters>'].join('\n'));
-    return parts.join('\n');
+    // Sister extensions may rewrite the finished scene text (transformScene); without any it is returned as built.
+    return String(pipe('transformScene', parts.join('\n'), { roster }) ?? '');
 }

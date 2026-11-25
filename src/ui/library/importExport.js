@@ -49,7 +49,7 @@ export async function importLibrary(e) {
             let id = String(raw.id || '').toLowerCase();
             if (!ID_PATTERN.test(id)) id = slugify(raw.name);
             if (lib()[id]) { id = uniqueId(id, x => !!lib()[x]); renamed++; }
-            const npc = { portrait: '', description: '', details: '', traits: {}, height: '', pronouns: '', sexuality: '', sexualExperience: '', wardrobe: [], defaultWorn: [], dialogue: [], ...raw, id, created: Date.now() };
+            const npc = { portrait: '', description: '', details: '', traits: {}, height: '', pronouns: '', sexuality: '', sexualExperience: '', dialogue: [], ...raw, id, created: Date.now() };
             if (String(npc.portrait).startsWith('data:')) {
                 try { npc.portrait = await uploadPortrait(npc.portrait, id); } catch (err) { console.warn('[NPC Book] portrait upload failed, keeping it inline', err); }
             }

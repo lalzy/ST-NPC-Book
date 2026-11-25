@@ -16,6 +16,40 @@ Write your reply as usual. Then, at the very end, add one <npcs> block that reco
 
 Put in the block:
 - A character already in the scene whose posture, state, feelings or clothing changed in your reply: their "id" and only the fields that changed. Compare with the scene: if a character's mood in your reply no longer matches their listed state (listed Calm, but your reply shows cold anger), that is a change, so give the new state.
+- A character who arrived: their "id" from Known NPCs, plus "posture" and "state". Someone not in Known NPCs (or a different person who shares a name) gets "name" and "new": true, plus "traits" with [[TRAIT_KEYS]], the profile fields, and an "outfit" for what they wear now (clothing that fits their role: a guard wears armor, a uniform, boots), as in the example.
+- Track characters who matter: anyone with a name, and the first individual who speaks to or deals directly with [[USER]] (the guard who stops them at the gate, the innkeeper, a shopkeeper). Name an unnamed one by role, e.g. "Gate Guard". Guards, patrons and townsfolk who only watch or stand around are background: leave them out. At most [[MAX_NEW]] new characters per reply.
+- A character who left: {"id": "...", "left": true}.
+- Report only what your reply actually shows. Leave out everyone and everything that did not change.
+- Every reply ends with the <npcs> block, even when nothing changed: write <npcs>[]</npcs>. A reply without it is incomplete.
+- Never list [[EXCLUDE]].
+
+Values:
+- "posture" is one of: [[POSTURES]]
+- "state" is one of: [[STATES]]
+- "feelings" is the character's private thoughts right now, 1-2 sentences.
+[[SPEAKER_RULE]]
+[[OUTFIT_RULES]]
+
+Example:
+<npcs>
+[
+  {"id": "existing_id", "posture": "Sitting"},
+  {"id": "other_id", "left": true},
+    {"name": "Mara", "new": true, "traits": {[[TRAIT_EXAMPLE]]}, "posture": "Standing", "state": "Curious", "feelings": "Who are these people?", "description": "Traveling herbalist.", "details": "Lean, sun-browned, grey-streaked braid. Blunt and practical, distrusts nobles. Grew up in the hill villages; speaks in short sentences.", "height": "168 cm", "pronouns": "she/her", "sexuality": "heterosexual", "sexual_experience": "experienced", "outfit": {"wear": [{"name": "Green wool dress", "slots": ["upper_outer", "lower_outer"]}, {"name": "Linen shift", "slots": ["upper_inner", "lower_inner"]}, {"name": "Leather boots", "slots": ["feet_outer"]}, {"name": "Herb satchel", "slots": ["other"]}]}}[[USER_EXAMPLE]]
+]
+</npcs>
+
+Known NPCs (id: name — identity):
+[[LIBRARY]]
+</npc_tracking_switch >`;
+
+/** The default tracking prompt while wardrobes were part of NPC Book: saved settings that still hold it exactly move to the new default. */
+export const DEFAULT_INSTRUCTIONS_V2 = `
+<npc_tracking_switch state=enabled>
+Write your reply as usual. Then, at the very end, add one <npcs> block that records what CHANGED in the scene during your reply. Do not explain or plan the block; just write it.
+
+Put in the block:
+- A character already in the scene whose posture, state, feelings or clothing changed in your reply: their "id" and only the fields that changed. Compare with the scene: if a character's mood in your reply no longer matches their listed state (listed Calm, but your reply shows cold anger), that is a change, so give the new state.
 - A character who arrived: their "id" from Known NPCs, plus "posture" and "state". Someone not in Known NPCs (or a different person who shares a name) gets "name" and "new": true, plus "traits" with [[TRAIT_KEYS]], the profile fields, and always a "wardrobe" of 4-8 items that fit their role (a guard: armor, uniform, boots) with an "outfit" for what they wear now, as in the example.
 - Track characters who matter: anyone with a name, and the first individual who speaks to or deals directly with [[USER]] (the guard who stops them at the gate, the innkeeper, a shopkeeper). Name an unnamed one by role, e.g. "Gate Guard". Guards, patrons and townsfolk who only watch or stand around are background: leave them out. At most [[MAX_NEW]] new characters per reply.
 - A character who left: {"id": "...", "left": true}.
@@ -70,6 +104,14 @@ Known NPCs (id: name — identity):
 </npc_tracking_switch>`;
 
 export const DEFAULT_OUTFIT_RULES = `Clothing:
+- When someone's clothing changes, add "outfit" to their entry with only what changed: {"wear": ["item"], "remove": ["item"], "condition": {"item": "<condition>"}}. An item is a name ("Blue jeans") or {"name": "Blue jeans", "slots": ["lower_outer"]}. Putting an item on replaces whatever is in the same slots. A slot can also be set directly: {"lower_outer": "Blue jeans", "feet_outer": "none"}.
+- Choose clothing that fits the situation, e.g. sleepwear in bed.
+- <wearing> is what each character has on right now. Its "exposure" (e.g. completely naked, topless, barefoot) is literal: describe and react to it accordingly.
+- "condition" is one of: [[CONDITIONS]]
+- Slots: [[SLOTS]]`;
+
+/** The clothing rules while wardrobes were part of NPC Book: saved settings that still hold them exactly move to the new default. */
+export const DEFAULT_OUTFIT_RULES_V2 = `Clothing:
 - Characters only wear items from their own wardrobe (listed in the scene). Never invent clothing for someone who has a wardrobe.
 - When someone's clothing changes, add "outfit": {"wear": ["item_id"], "remove": ["item_id"], "condition": {"item_id": "<condition>"}} to their entry. Putting an item on replaces whatever is in the same slots.
 - Choose clothing that fits the situation, e.g. sleepwear in bed.
@@ -77,21 +119,8 @@ export const DEFAULT_OUTFIT_RULES = `Clothing:
 - "condition" is one of: [[CONDITIONS]]
 - A new character also gets "wardrobe": 4-8 fitting items as [{"name": "...", "slots": ["..."]}], and "outfit": {"wear": ["item name", ...]} for what they wear now. Slots: [[SLOTS]]`;
 
-export const DEFAULT_RELATIONSHIP_RULE = `Relationships:
-- When your reply changes how a character feels about someone ([[USER]] or another character), or they form a new bond, add "relationships" to that character's entry with only what changed, e.g. {"id": "...", "relationships": {"user": {"type": "Friend", "attitude": "Friendly", "note": "Saved her from the bandit."}}}.
-- Use "user" for [[USER]] and the id for anyone else. Give "type" only for a new or changed bond; "note" is one short line.
-- "type" is one of: [[REL_TYPES]]
-- "attitude" is one of: [[ATTITUDES]]
-- Use these exact words. Anything else is ignored.`;
 
-/** The first default relationship type list (no pairs): saved settings that still hold it exactly get the paired default. */
-export const DEFAULT_RELATIONSHIP_TYPES_V1 = ['Stranger', 'Acquaintance', 'Friend', 'Close friend', 'Lover', 'Spouse', 'Family', 'Sibling', 'Parent', 'Child', 'Mentor', 'Student', 'Employer', 'Employee', 'Colleague', 'Rival', 'Enemy'];
 
-/** The first relationship rule (free-text types): saved settings that still hold it exactly are moved to the new default. */
-export const DEFAULT_RELATIONSHIP_RULE_V1 = `Relationships:
-- When your reply changes how a character feels about someone ([[USER]] or another character), or they form a new bond, add "relationships" to that character's entry with only what changed, e.g. {"id": "...", "relationships": {"user": {"attitude": "Friendly", "note": "Saved her from the bandit."}}}.
-- Use "user" for [[USER]] and the id for anyone else. Give "type" (friend, sister, rival, employer...) only for a new or changed bond; "note" is one short line.
-- "attitude" is one of: [[ATTITUDES]]`;
 
 export const DEFAULT_SPEAKER_RULE = `Speaker blocks (mandatory in every reply):
 - Everything a character does or says goes inside <npc id="ID">...</npc>: their actions, the narration about them, and all of their dialogue. Use their exact id from the scene.
@@ -110,11 +139,6 @@ export const DEFAULT_ASSIST_CARD_PROMPT = `You help write character cards for NP
 - Be concrete and specific; avoid clichés and purple prose.
 - Answer with one JSON object and nothing else.`;
 
-export const DEFAULT_ASSIST_WARDROBE_PROMPT = `You help build wardrobes for characters in a roleplay.
-- Suggest clothing that fits the character (culture, era, job, personality, budget) and the request.
-- Give each item a plain, specific name with color or material, e.g. "Green wool dress".
-- Each item covers one or more body slots; a dress covers upper_outer and lower_outer, a jumpsuit too.
-- Answer with one JSON object and nothing else.`;
 
 export const DEFAULT_PORTRAIT_LLM_PROMPT = `Describe {{name}}'s portrait for an image generator. Use the template below.
 
@@ -187,7 +211,7 @@ export const HEX_RE = /^#[0-9a-f]{6}$/i;
 /** Concrete example values for the tracking prompt (smaller models copy "..." literally). */
 export const TRAIT_SAMPLES = { race: 'human', species: 'human', age: '41', gender: 'female', sex: 'female', role: 'herbalist', job: 'herbalist', occupation: 'herbalist', class: 'commoner' };
 
-export const DEFAULT_USER_RULE = `- When [[USER]]'s posture or clothing changes, add {"id": "user"} with only what changed ("posture" from the list above, "outfit" with items from [[USER]]'s wardrobe). Never give [[USER]] a state or feelings.`;
+export const DEFAULT_USER_RULE = `- When [[USER]]'s posture or clothing changes, add {"id": "user"} with only what changed ("posture" from the list above, "outfit" as for everyone else). Never give [[USER]] a state or feelings.`;
 
 export const DEFAULTS = {
     enabled: true,
@@ -222,22 +246,11 @@ export const DEFAULTS = {
     speakerRule: DEFAULT_SPEAKER_RULE,
     speakerReminder: DEFAULT_SPEAKER_REMINDER,
     trackOutfits: true,
-    trackRelationships: false, // optional: relationships cost context, so they are opt-in
-    attitudes: ['Hostile', 'Distrustful', 'Wary', 'Neutral', 'Friendly', 'Warm', 'Close', 'Devoted'],
-    // One type per line; "A <> B" pairs two types that are each other's reverse (used by the ⇄ link).
-    relationshipTypes: ['Stranger', 'Acquaintance', 'Friend', 'Close friend', 'Lover', 'Spouse', 'Family', 'Sibling', 'Parent <> Child', 'Mentor <> Student', 'Employer <> Employee', 'Colleague', 'Rival', 'Enemy'],
-    relationshipRule: DEFAULT_RELATIONSHIP_RULE,
-    relViewLayout: 'web', // relationship view: 'web' | 'tree' (remembered)
-    relViewDepth: 2, // 1 = direct only, 2 = + their links
-    includeWardrobe: true,
-    allowWardrobeGrowth: true,
-    wardrobeDollCollapsed: false,
     folders: [],
     folderCollapsed: [],
     autoFolder: '',
     maxNewPerReply: 2,
     assistCardPrompt: DEFAULT_ASSIST_CARD_PROMPT,
-    assistWardrobePrompt: DEFAULT_ASSIST_WARDROBE_PROMPT,
     outfitRules: DEFAULT_OUTFIT_RULES,
     conditions: ['Worn', 'Loosened', 'Disheveled', 'Wet', 'Dirty', 'Bloody', 'Torn'],
     personas: {},

@@ -2,9 +2,9 @@
 // Greeting starting-cast block: parsing and applying intro overrides.
 
 import { matchBracket, stripTrailingCommas } from './json.js';
-import { findItem, findItemLoose, wearItem } from './outfit.js';
-import { inferSlots, normalizeSlot } from './slots.js';
-import { normalize, pickEnum, uniqueId } from './text.js';
+import { applyClothing } from './outfit.js';
+import { normalizeSlot } from './slots.js';
+import { normalize, pickEnum } from './text.js';
 
 /** Turn the parsed "characters" array into [{ ref, overrides }]. Every entry must be an object with an "id". */
 export function castEntries(list) {
@@ -61,69 +61,14 @@ export function extractCharacterList(text) {
 }
 
 /**
- * Apply a clothing override to an outfit. Items missing from the wardrobe are created (returned in `added`).
- *   "jeans" / ["jeans", "t-shirt"]            put on (replaces whatever is in the same slots)
- *   {"bottom-outer": "jeans", "feet": "none"}  per slot; "none" / "nothing" / null empties that slot
- *   "nothing"                                 everything off
- *   {"wear": [...], "remove": [...]}           explicit lists; "remove": "all"
- *   "jeans (wet)"                             with a condition from the conditions list
+ * Apply a clothing override to an outfit (see applyClothing in outfit.js for the accepted shapes). Items are matched
+ * loosely against `catalog` (known items, e.g. a wardrobe) and what is worn; anything else is created as a new item
+ * (returned in `added`), unless `strict`. Returns { outfit, added, warnings }.
  */
-export function applyClothingOverride(outfit, wardrobe, value, conditions = ['Worn']) {
-    let cur = (outfit || []).map(x => ({ ...x }));
-    let wd = [...(wardrobe || [])];
-    const added = [];
-    const warnings = [];
-    const def = conditions?.[0] ?? 'Worn';
-    const list = v => (Array.isArray(v) ? v : (v === undefined ? [] : [v]));
-    const isNone = x => x === null || x === false || /^(none|nothing|naked|nude|empty|-)?$/i.test(String(x).trim());
-    const resolve = (ref, slot) => {
-        let name = String(ref).trim();
-        let cond = def;
-        const cm = name.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
-        if (cm) { const c = pickEnum(cm[2], conditions, null); if (c) { name = cm[1].trim(); cond = c; } }
-        let item = findItemLoose(wd, name, slot);
-        if (!item) {
-            item = { id: uniqueId(name, x => wd.some(i => i.id === x)), name, slots: slot ? [slot] : inferSlots(name), note: '' };
-            wd = [...wd, item];
-            added.push(item);
-        }
-        return { item, cond };
-    };
-    const wear = (ref, slot) => { const { item, cond } = resolve(ref, slot); cur = wearItem(cur, wd, item.id, cond).outfit; };
-    const clearSlot = (slot) => { cur = cur.filter(w => !(findItem(wd, w.id)?.slots || []).includes(slot)); };
-    const removeRef = (ref) => {
-        if (/^all$/i.test(String(ref).trim())) { cur = []; return; }
-        const it = findItemLoose(wd, ref);
-        if (it) cur = cur.filter(w => w.id !== it.id); else warnings.push(`remove: "${ref}" is not in the wardrobe`);
-    };
-    const setCondition = (ref, c) => {
-        const it = findItemLoose(wd, ref);
-        const w = it && cur.find(x => x.id === it.id);
-        const cc = pickEnum(c, conditions, null);
-        if (w && cc) w.condition = cc; else warnings.push(`condition: could not set "${ref}" to "${c}"`);
-    };
-    const handle = (val) => {
-        if (Array.isArray(val)) { val.forEach(handle); return; }
-        if (val && typeof val === 'object') {
-            for (const [k, x] of Object.entries(val)) {
-                const nk = normalize(k);
-                if (nk === 'wear') list(x).forEach(handle);
-                else if (nk === 'remove') list(x).forEach(removeRef);
-                else if (nk === 'condition' || nk === 'conditions') { if (x && typeof x === 'object') for (const [r, c] of Object.entries(x)) setCondition(r, c); }
-                else {
-                    const slot = normalizeSlot(k);
-                    if (!slot) { warnings.push(`unknown clothing slot "${k}"`); continue; }
-                    clearSlot(slot);
-                    for (const ref of list(x)) if (!isNone(ref)) wear(ref, slot);
-                }
-            }
-            return;
-        }
-        if (isNone(val)) { cur = []; return; }
-        wear(val, null);
-    };
-    handle(value);
-    return { outfit: cur, wardrobe: wd, added, warnings };
+export function applyClothingOverride(outfit, value, { conditions = ['Worn'], catalog = [], strict = false } = {}) {
+    const r = applyClothing(outfit, value, { conditions, catalog, strict, loose: true });
+    const warnings = [...r.warnings, ...r.rejected.map(x => `"${x}" is not allowed (not in the wardrobe)`)];
+    return { outfit: r.outfit, added: r.created, warnings };
 }
 
 const OVERRIDE_FIELDS = {
@@ -136,17 +81,16 @@ const OVERRIDE_FIELDS = {
 /**
  * Apply intro-cast overrides ({posture, state, feelings, clothing, or slot keys directly}) to a scene instance.
  * Posture / state use the list value when it matches (case-insensitive), otherwise the text as written.
- * Returns { instance, wardrobe, added, warnings }.
+ * Returns { instance, added (clothing made up for this greeting), warnings }.
  */
-export function applyCastOverrides(inst, overrides, { wardrobe = [], postures = [], states = [], conditions = ['Worn'] } = {}) {
+export function applyCastOverrides(inst, overrides, { catalog = [], strict = false, postures = [], states = [], conditions = ['Worn'] } = {}) {
     const out = { ...inst, outfit: (inst?.outfit || []).map(x => ({ ...x })) };
-    let wd = [...(wardrobe || [])];
     const added = [];
     const warnings = [];
     const asEnum = (v, list) => { const t = String(v ?? '').trim(); return t ? pickEnum(t, list, t) : ''; };
     const dress = (v) => {
-        const r = applyClothingOverride(out.outfit, wd, v, conditions);
-        out.outfit = r.outfit; wd = r.wardrobe; added.push(...r.added); warnings.push(...r.warnings);
+        const r = applyClothingOverride(out.outfit, v, { conditions, catalog, strict });
+        out.outfit = r.outfit; added.push(...r.added); warnings.push(...r.warnings);
     };
     for (const [rawK, v] of Object.entries(overrides || {})) {
         const k = normalize(rawK).replace(/[\s-]+/g, '_');
@@ -158,5 +102,5 @@ export function applyCastOverrides(inst, overrides, { wardrobe = [], postures = 
         else if (normalizeSlot(rawK)) dress({ [rawK]: v });
         else warnings.push(`unknown field "${rawK}"`);
     }
-    return { instance: out, wardrobe: wd, added, warnings };
+    return { instance: out, added, warnings };
 }

@@ -3,9 +3,8 @@
 
 import { attachInstance, cloneScene, unusedTemplates } from './instances.js';
 import { resolveEntry } from './matching.js';
-import { applyOutfitChange, buildWardrobe, newClothingIn, normOutfitChange } from './outfit.js';
+import { applyOutfitChange, normOutfitChange, resolveOutfit } from './outfit.js';
 import { PROFILE_TRAIT_KEYS, profileFromEntry } from './profile.js';
-import { applyRelationshipChanges, normalizeRelationshipChanges, resolveRelationshipTarget } from './relationships.js';
 import { cleanId, normalize, pickEnum, uniqueId } from './text.js';
 
 function titleFromId(id) { return String(id).replace(/[_-]+/g, ' ').replace(/\b[a-z]/g, c => c.toUpperCase()).trim(); }
@@ -26,12 +25,15 @@ function isLeaving(entry) {
  * else a new template is created. A template is only read to create an instance; after that only the instance changes.
  * Leaving only deactivates: the instance stays in the chat for when the character returns.
  * prepareNew(template, entry) may decorate a newly created template before its instance is copied from it.
+ * onEntry(instance, entry, { isNew }, scene) runs last for every applied (non-leaving) entry, on the scene's own instance.
+ * catalogFor(instance) → { items, strict } offers known clothing (e.g. a wardrobe) for outfit changes; without it,
+ * any clothing can be worn. onCreate(instance, template) is passed on to new instances.
  * Returns { scene, created: [template], createdEntries, skipped, log }.
  */
-export function applyTracker(list, prevScene, { library, threshold, numericTolerance, postures, states, conditions = ['Worn'], allowWardrobeGrowth = false, trackRelationships = false, attitudes = [], relationshipTypes = [], userName = '', autoCreate = true, traitKeys = [], excludeNames = [], maxNew = 0, prepareNew = null }) {
+export function applyTracker(list, prevScene, { library, threshold, numericTolerance, postures, states, conditions = ['Worn'], autoCreate = true, traitKeys = [], excludeNames = [], maxNew = 0, prepareNew = null, onEntry = null, catalogFor = null, onCreate = null }) {
     const scene = cloneScene(prevScene);
     const lib = { ...(library || {}) };
-    const opts = { postures, states, conditions };
+    const opts = { postures, states, conditions, onCreate };
     const created = [];
     const createdEntries = [];
     const skipped = [];
@@ -68,10 +70,8 @@ export function applyTracker(list, prevScene, { library, threshold, numericToler
                 if (PROFILE_TRAIT_KEYS.has(key)) continue; // stored as card fields, not identity traits
                 traits[key] = String(v ?? '');
             }
-            // Its listed wardrobe, plus anything it is wearing that the list forgot.
-            const listed = buildWardrobe(entry.wardrobe);
-            const wb = buildWardrobe(newClothingIn(normOutfitChange(entry), listed.wardrobe), listed.wardrobe);
-            const initial = applyOutfitChange([], wb.wardrobe, normOutfitChange(entry), conditions).outfit;
+            // What they wear now: any clothing (a sister extension may have rewritten the entry to match its catalog).
+            const initial = applyOutfitChange([], normOutfitChange(entry), { conditions }).outfit;
             const t = {
                 id: newId,
                 name: nm || titleFromId(newId),
@@ -80,8 +80,8 @@ export function applyTracker(list, prevScene, { library, threshold, numericToler
                 details: String(entry.details ?? entry.description ?? '').trim(),
                 traits,
                 ...profileFromEntry(entry),
-                wardrobe: wb.wardrobe,
-                defaultWorn: initial.map(w => w.id),
+                outfit: initial,
+                ...(normOutfitChange(entry) ? { dressed: true } : {}),
                 auto: true,
                 created: Date.now(),
             };
@@ -99,31 +99,18 @@ export function applyTracker(list, prevScene, { library, threshold, numericToler
         if (!isNew) {
             if (!wasActive) log.push({ name: inst.name, action: hadInstance ? 'returned' : 'arrived', id, reason, score });
             else log.push({ name: inst.name, action: 'changed', id });
-            // New clothing (given, bought, found): what they put on that is not in their wardrobe yet joins this chat's
-            // instance wardrobe first (never the template), so it can be worn now and later.
-            const change = normOutfitChange(entry);
-            if (allowWardrobeGrowth) {
-                const gained = [...(Array.isArray(entry.wardrobe) ? entry.wardrobe : []), ...newClothingIn(change, inst.wardrobe || [])];
-                const grown = buildWardrobe(gained, inst.wardrobe || []);
-                if (grown.added.length) { inst.wardrobe = grown.wardrobe; log.push({ name: inst.name, action: 'wardrobe-added', id, items: grown.added.map(x => x.name) }); }
-            }
-            const oc = applyOutfitChange(inst.outfit, inst.wardrobe || [], change, conditions);
+            const cat = typeof catalogFor === 'function' ? (catalogFor(inst) || {}) : {};
+            const oc = applyOutfitChange(resolveOutfit(inst.outfit, inst.wardrobe || []), normOutfitChange(entry), { conditions, catalog: cat.items || [], strict: !!cat.strict });
             inst.outfit = oc.outfit;
+            if (normOutfitChange(entry)) inst.dressed = true; // clothing was set (even to nothing): always report it
+            if (oc.created.length) log.push({ name: inst.name, action: 'clothing-new', id, items: oc.created.map(x => x.name) });
             if (oc.rejected.length) log.push({ name: inst.name, action: 'outfit-rejected', items: oc.rejected });
         }
         inst.posture = pickEnum(entry.posture, postures, inst.posture);
         inst.state = pickEnum(entry.state, states, inst.state);
         const feelings = entry.feelings ?? entry.thoughts;
         if (feelings !== undefined && feelings !== null && String(feelings).trim()) inst.feelings = String(feelings).trim();
-        // Relationship changes land on this chat's instance. Targets: "user", the chat's NPCs, then library NPCs.
-        if (trackRelationships && entry.relationships) {
-            const people = { ...lib, ...scene.instances };
-            const rc = applyRelationshipChanges(inst.relationships, normalizeRelationshipChanges(entry.relationships), {
-                attitudes, types: relationshipTypes, self: id, resolve: (ref) => resolveRelationshipTarget(ref, people, userName),
-            });
-            if (rc.changed.length) { inst.relationships = rc.list; log.push({ name: inst.name, action: 'relationships', id, items: rc.changed }); }
-            if (rc.rejected.length) log.push({ name: inst.name, action: 'relationship-rejected', id, items: rc.rejected });
-        }
+        if (typeof onEntry === 'function') onEntry(inst, entry, { isNew }, scene);
     }
     return { scene, created, createdEntries, skipped, log };
 }

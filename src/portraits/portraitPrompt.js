@@ -3,7 +3,7 @@
 import { ctx } from '../core/context.js';
 import { profileOf, traitSummary } from '../core/npcs.js';
 import { settings } from '../core/settings.js';
-import { findItem, outfitFromDefault } from '../logic/outfit.js';
+import { resolveOutfit, startingOutfit } from '../logic/outfit.js';
 import { recentStory } from '../scene/story.js';
 
 export function cleanForImagine(x) {
@@ -17,12 +17,8 @@ export function cleanForImagine(x) {
 function portraitData(t) {
     const s = settings();
     const inst = t.instanceOf ? t : null;
-    const outfit = inst?.outfit ?? outfitFromDefault(t.defaultWorn, t.wardrobe || [], s.conditions);
-    const wearing = (outfit || []).map(w => {
-        const it = findItem(t.wardrobe || [], w.id);
-        if (!it) return null;
-        return `${it.name}${w.condition && w.condition !== s.conditions[0] ? ` (${w.condition})` : ''}`;
-    }).filter(Boolean).join(', ');
+    const outfit = inst ? resolveOutfit(inst.outfit, t.wardrobe || []) : startingOutfit(t, s.conditions);
+    const wearing = outfit.map(w => `${w.name}${w.condition && w.condition !== s.conditions[0] ? ` (${w.condition})` : ''}`).join(', ');
     const labeled = settings().traitKeys.map(k => (t.traits?.[k] ? `${k}: ${t.traits[k]}` : null)).filter(Boolean).join('; ');
     return {
         name: t.name,
@@ -31,7 +27,7 @@ function portraitData(t) {
         description: String(t.description || '').trim(),
         traits: traitSummary(t),
         details: String(t.details || '').trim(),
-        outfit: wearing || (t.wardrobe?.length ? 'nothing' : ''),
+        outfit: wearing || (inst ? 'nothing' : ''),
         posture: inst?.posture || '',
         state: inst?.state || '',
     };

@@ -102,27 +102,10 @@
             <div class="inline-drawer-content">
                 <label class="checkbox_label"><input type="checkbox" id="npcb_trackuser"> Track me (posture + outfit)</label>
                 <label class="checkbox_label"><input type="checkbox" id="npcb_personainuser"> Persona description inside &lt;user&gt; <i class="fa-solid fa-circle-info npcb-help" title="Then disable SillyTavern's own Persona Description prompt, or it is sent twice."></i></label>
-                <label class="checkbox_label"><input type="checkbox" id="npcb_trackoutfits"> Track outfits</label>
+                <label class="checkbox_label"><input type="checkbox" id="npcb_trackoutfits"> Track outfits <i class="fa-solid fa-circle-info npcb-help" title="What everyone wears, per slot (the paper doll). Any clothing can be worn; a wardrobe sister extension can limit it to what each character owns."></i></label>
                 <label class="checkbox_label"><input type="checkbox" id="npcb_exposure"> Spell out exposure <i class="fa-solid fa-circle-info npcb-help" title="Adds e.g. 'completely naked', 'topless', 'in underwear only', 'barefoot' to what a character is wearing."></i></label>
-                <label class="checkbox_label"><input type="checkbox" id="npcb_incwardrobe"> Send wardrobes to the LLM</label>
-                <label class="checkbox_label"><input type="checkbox" id="npcb_wdgrowth"> NPCs can get new clothing <i class="fa-solid fa-circle-info npcb-help" title="When an NPC puts on something it does not own (given, bought, found), the item is added to its wardrobe in this chat. The Library card is never changed."></i></label>
                 <div class="npcb-prompts">
                     <div class="menu_button npcb-prompt-btn" data-prompt="outfitRules"><i class="fa-solid fa-pen-to-square"></i> Clothing rules</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Relationships -->
-        <div class="inline-drawer npcb-sec">
-            <div class="inline-drawer-toggle inline-drawer-header"><span class="npcb-sec-title"><i class="fa-solid fa-people-arrows fa-fw"></i> Relationships</span><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>
-            <div class="inline-drawer-content">
-                <label class="checkbox_label"><input type="checkbox" id="npcb_relationships"> Track relationships <i class="fa-solid fa-circle-info npcb-help" title="Adds a Relationships tab to NPC cards and the in-chat card. Each NPC in the scene sends its relationships with you and with the others present, and the LLM reports changes. Costs context: off by default."></i></label>
-                <div class="npcb-row npcb-lists">
-                    <label>Types <i class="fa-solid fa-circle-info npcb-help" title="The only relationship types allowed, one per line. The LLM must use one of these exact words; anything else is ignored, so wording cannot drift (Friend → Good friends → became friends with…). Pair two types with &lt;&gt; when each is the other's reverse, e.g. Employer &lt;&gt; Employee or Master &lt;&gt; Slave: the ⇄ link then gives the other person the paired type. A single type (Friend) is the same both ways."></i><textarea id="npcb_reltypes" class="text_pole textarea_compact" rows="8"></textarea></label>
-                    <label>Attitudes <i class="fa-solid fa-circle-info npcb-help" title="How an NPC feels about someone, one per line, worst to best. Enforced the same way as types."></i><textarea id="npcb_attitudes" class="text_pole textarea_compact" rows="8"></textarea></label>
-                </div>
-                <div class="npcb-prompts">
-                    <div class="menu_button npcb-prompt-btn" data-prompt="relationshipRule"><i class="fa-solid fa-pen-to-square"></i> Relationship rule</div>
                 </div>
             </div>
         </div>
@@ -169,8 +152,7 @@
             <div class="inline-drawer-content">
                 <div class="npcb-prompts">
                     <div class="menu_button npcb-prompt-btn" data-prompt="assistCardPrompt"><i class="fa-solid fa-pen-to-square"></i> Card assist</div>
-                    <div class="menu_button npcb-prompt-btn" data-prompt="assistWardrobePrompt"><i class="fa-solid fa-pen-to-square"></i> Wardrobe assist</div>
-                    <i class="fa-solid fa-circle-info npcb-help" title="System prompts for the ✨ Assist panel in the NPC Library. Fields, card context and the JSON format are added automatically."></i>
+                    <i class="fa-solid fa-circle-info npcb-help" title="System prompt for the ✨ Assist panel on the NPC Library's Card tab. Fields, card context and the JSON format are added automatically."></i>
                 </div>
             </div>
         </div>
@@ -205,7 +187,7 @@
 }
 ```</pre>
         <p><b>Fields:</b> posture, state/mood, feelings, clothing. Each NPC starts from this chat's copy (or its Library card the first time); these fields override that for the greeting.</p>
-        <p><b>Clothing:</b> a slot map (<code>{"bottom-outer": "jeans", "feet": "none"}</code>), a list to put on (<code>["jeans", "white shirt (wet)"]</code>, start with <code>"nothing"</code> to undress first), or <code>"nothing"</code>. Slot keys also work directly (<code>{"id": "suzie", "feet": "none"}</code>). Items match loosely ("jeans" finds "Blue Jeans"); missing items are added to the wardrobe. <code>"id": "user"</code> sets your own posture and clothing.</p>
+        <p><b>Clothing:</b> a slot map (<code>{"bottom-outer": "jeans", "feet": "none"}</code>), a list to put on (<code>["jeans", "white shirt (wet)"]</code>, start with <code>"nothing"</code> to undress first), or <code>"nothing"</code>. Slot keys also work directly (<code>{"id": "suzie", "feet": "none"}</code>). Any clothing can be named; items already worn (or in a wardrobe, with the Wardrobe sister extension) match loosely ("jeans" finds "Blue Jeans"). <code>"id": "user"</code> sets your own posture and clothing.</p>
     </div>
 </template>
 </div>

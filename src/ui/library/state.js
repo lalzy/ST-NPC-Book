@@ -5,10 +5,9 @@ export const libState = {
     selected: null,
     isNew: false,
     draftPortrait: null,
-    draftWardrobe: null,
-    wardrobeUi: null,
+    draftOutfit: [],
+    dollUi: null,
     newFolder: '',
     draftExt: {},
     draftDialogue: [],
-    draftRelationships: [],
 };

@@ -2,10 +2,12 @@
 
 import { MODULE } from '../constants.js';
 import { ctx, hasChat, meta } from '../core/context.js';
-import { lib, save, settings } from '../core/settings.js';
+import { claimedEntryKeys, outfitCatalog, runEntryHooks, transformEntry } from '../core/extHooks.js';
+import { lib, settings } from '../core/settings.js';
 import { clone, esc, sig } from '../core/utils.js';
 import { applyCastOverrides, extractCharacterList } from '../logic/castList.js';
 import { attachInstance, cloneScene, toScene } from '../logic/instances.js';
+import { resolveOutfit } from '../logic/outfit.js';
 import { resolveRef } from '../logic/matching.js';
 import { normalize } from '../logic/text.js';
 import { personaData, userBefore } from '../scene/persona.js';
@@ -24,7 +26,7 @@ export async function processGreetings() {
     const chat = c.chat || [];
     let changed = false;
     let carried = toScene(meta()?.base);
-    const notes = { missing: new Set(), added: [], warnings: new Set(), errors: new Set() };
+    const notes = { missing: new Set(), warnings: new Set(), errors: new Set() };
     for (let i = 0; i < chat.length; i++) {
         const msg = chat[i];
         if (msg.is_user) break;
@@ -66,10 +68,6 @@ export async function processGreetings() {
         console.warn('[NPC Book] intro cast:', [...notes.warnings]);
         toastr.warning([...notes.warnings].map(esc).join('<br>'), 'NPC Book: intro cast', { escapeHtml: false });
     }
-    if (notes.added.length) {
-        save(); // persona wardrobe additions live in settings; NPC additions are in the chat's instances
-        toastr.info(`Added to wardrobe: ${notes.added.join('; ')}`, 'NPC Book');
-    }
     if (changed) {
         await c.saveChat?.();
         renderRoster();
@@ -86,31 +84,45 @@ function isUserRef(ref) {
 /**
  * Build the scene for an intro message from its cast entries [{ref, overrides}].
  * Each NPC is the chat's instance if it has one, else a new instance from its template; overrides replace parts of that.
- * Clothing named in an override but missing from the wardrobe is added to the instance's wardrobe (never the template's).
+ * Clothing named in an override is worn as written (or matched to a sister extension's catalog, e.g. a wardrobe).
  */
 function applyIntroCast(entries, carried, user, notes) {
     const s = settings();
     const opts = { postures: s.postures, states: s.states, conditions: s.conditions };
     const scene = cloneScene(carried);
     let u = clone(user);
-    for (const e of entries || []) {
+    const claimed = claimedEntryKeys();
+    for (const raw of entries || []) {
+        // Sister extensions may rewrite or drop a cast entry (transformEntry), and keys they claim (entryKeys) are theirs:
+        // NPC Book does not warn about them. With no extensions this is the entry as written.
+        const full = transformEntry({ id: raw.ref, ...raw.overrides }, { source: 'greeting', messageIndex: null });
+        if (!full) continue;
+        const { id: ref, ...rest } = full;
+        const e = { ref: String(ref ?? raw.ref), overrides: Object.fromEntries(Object.entries(rest).filter(([k]) => !claimed.has(k.toLowerCase()))) };
         if (isUserRef(e.ref)) {
             const p = personaData();
-            const r = applyCastOverrides({ posture: u.posture, outfit: u.outfit || [] }, e.overrides, { ...opts, wardrobe: p.wardrobe });
-            const outfitChanged = JSON.stringify(r.instance.outfit) !== JSON.stringify(u.outfit || []);
+            const worn = resolveOutfit(u.outfit, p.wardrobe || []);
+            const cat = outfitCatalog({ source: 'greeting', kind: 'user', id: 'user', subject: p, ext: { ...(p.ext || {}), ...(u.ext || {}) } });
+            const r = applyCastOverrides({ posture: u.posture, outfit: worn }, e.overrides, { ...opts, catalog: cat.items, strict: cat.strict });
+            const outfitChanged = JSON.stringify(r.instance.outfit) !== JSON.stringify(worn);
             u = { ...u, posture: r.instance.posture, outfit: r.instance.outfit, dressed: u.dressed || outfitChanged };
-            if (r.added.length) { p.wardrobe = r.wardrobe; notes.added.push(`${ctx().name1}: ${r.added.map(x => x.name).join(', ')}`); }
             r.warnings.forEach(w => notes.warnings.add(`${ctx().name1}: ${w}`));
+            runEntryHooks({ kind: 'user', source: 'greeting', id: 'user', name: ctx().name1, entry: full, isNew: false, user: u },
+                (x) => u.ext?.[x] ?? personaData().ext?.[x],
+                (x, d) => { u.ext = { ...(u.ext || {}), [x]: d }; });
             continue;
         }
         const id = resolveRef(e.ref, scene.instances) ?? resolveRef(e.ref, lib());
         const inst = id ? attachInstance(scene, id, lib(), instanceOpts()) : null;
         if (!inst) { notes.missing.add(e.ref); continue; }
-        const r = applyCastOverrides(inst, e.overrides, { ...opts, wardrobe: inst.wardrobe || [] });
+        const cat = outfitCatalog({ source: 'greeting', kind: 'char', id: inst.id, subject: inst, ext: inst.ext || {} });
+        const r = applyCastOverrides({ ...inst, outfit: resolveOutfit(inst.outfit, inst.wardrobe || []) }, e.overrides, { ...opts, catalog: cat.items, strict: cat.strict });
+        if (JSON.stringify(r.instance.outfit) !== JSON.stringify(inst.outfit)) r.instance.dressed = true;
         Object.assign(inst, r.instance);
-        inst.wardrobe = r.wardrobe;
-        if (r.added.length) notes.added.push(`${inst.name}: ${r.added.map(x => x.name).join(', ')}`);
         r.warnings.forEach(w => notes.warnings.add(`${inst.name}: ${w}`));
+        runEntryHooks({ kind: 'char', source: 'greeting', id: inst.id, name: inst.name, entry: full, isNew: false, instance: inst },
+            (x) => inst.ext?.[x],
+            (x, d) => { inst.ext = inst.ext || {}; inst.ext[x] = d; });
     }
     return { scene, user: u };
 }

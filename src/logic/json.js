@@ -35,7 +35,7 @@ export function salvageObjects(text) {
     return out;
 }
 
-/** An entry that will not parse: retry with one nested object/array (an optional "gurps" sheet, say) replaced by null, last one first. */
+/** An entry that will not parse: retry with one nested object/array (a sister extension's sheet, say) replaced by null, last one first. */
 function dropBrokenParts(chunk) {
     const s = String(chunk);
     const parts = [];

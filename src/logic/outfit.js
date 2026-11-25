@@ -1,163 +1,215 @@
 // NPC Book — pure logic (no DOM / no SillyTavern imports). Testable in Node.
-// Wardrobe and outfit operations: wearing, removing, outfit changes, exposure summary.
+// Outfit operations: what a character wears, per slot. Items are self-contained ({id, name, slots, condition, note?}):
+// any clothing can be worn. A catalog (e.g. a sister extension's wardrobe) may offer known items and, when strict,
+// limit what can be worn; without one, anything goes.
 
-import { SLOTS, STACKING_SLOTS, inferSlots, normalizeSlots } from './slots.js';
-import { normalize, pickEnum, uniqueId } from './text.js';
+import { SLOTS, STACKING_SLOTS, inferSlots, normalizeSlot, normalizeSlots } from './slots.js';
+import { normalize, pickEnum, slugify } from './text.js';
 
-export function normOutfitChange(entry) {
-    const o = entry?.outfit;
-    if (!o) return entry?.wear ? { wear: entry.wear } : null;
-    if (Array.isArray(o)) return { wear: o };
-    return o;
-}
-
-export function findItem(wardrobe, ref) {
-    if (!ref) return null;
-    const r = String(ref).trim().toLowerCase();
-    const n = normalize(ref);
-    return (wardrobe || []).find(i => i.id === r) || (wardrobe || []).find(i => normalize(i.name) === n) || null;
-}
-
-/** Build wardrobe items from LLM/raw data, giving each a unique id. */
-export function buildWardrobe(rawItems, existing = []) {
-    const out = [...existing];
-    const added = [];
-    for (const raw of Array.isArray(rawItems) ? rawItems : []) {
-        const name = String(typeof raw === 'string' ? raw : raw?.name ?? '').trim();
-        if (!name) continue;
-        if (out.some(i => normalize(i.name) === normalize(name))) continue;
-        const item = {
-            id: uniqueId(raw?.id || name, x => out.some(i => i.id === x)),
-            name,
-            slots: (raw?.slots ?? raw?.slot) ? normalizeSlots(raw?.slots ?? raw?.slot) : inferSlots(name),
-            note: String(raw?.note ?? raw?.description ?? '').trim(),
-        };
-        out.push(item);
-        added.push(item);
-    }
-    return { wardrobe: out, added };
-}
-
-function conflicts(a, b) {
-    return a.slots.some(s => !STACKING_SLOTS.has(s) && b.slots.includes(s));
-}
-
-/** Put on an item: anything occupying the same (non-stacking) slots comes off. */
-export function wearItem(outfit, wardrobe, ref, condition) {
-    const item = findItem(wardrobe, ref);
-    if (!item) return { outfit, ok: false };
-    const next = outfit.filter(w => {
-        if (w.id === item.id) return false;
-        const other = findItem(wardrobe, w.id);
-        return !(other && conflicts(other, item));
-    });
-    next.push({ id: item.id, condition });
-    return { outfit: next, ok: true };
-}
-
-/**
- * Apply an LLM outfit change {wear:[], remove:[], condition:{}} using ONLY items from the wardrobe.
- * Unknown items are ignored (and reported in `rejected`).
- */
 const NOTHING = /^(nothing|none|naked|nude)$/i;
+const SLOT_KEYS = new Set(SLOTS.map(x => x.key));
+const IS_NONE = (x) => x === null || x === false || /^(none|nothing|naked|nude|empty|-)?$/i.test(String(x).trim());
 /** Example ids from the prompt that small models copy literally; never clothing. */
 const PLACEHOLDER = /^(item[_ -]?(id|name)s?|items?|ids?|names?|\.{2,}|…)$/i;
 
-/** An outfit-change reference as text: a string, or an object written as {"id": ...} / {"name": ...}. */
-function itemRef(r) { return r && typeof r === 'object' ? String(r.id ?? r.name ?? '') : r; }
-
-/** "blue_silk_dress" → "Blue silk dress"; a name that already reads as one is kept as written. */
-function nameFromRef(ref) {
-    const s = String(ref).trim();
-    if (/\s/.test(s) || !/[_-]/.test(s)) return s;
-    const words = s.replace(/[_-]+/g, ' ').trim();
-    return words.charAt(0).toUpperCase() + words.slice(1);
+/** The outfit change of a tracker entry: entry.outfit (object, list or string) or a bare entry.wear. */
+export function normOutfitChange(entry) {
+    const o = entry?.outfit;
+    if (o === undefined || o === null) return entry?.wear ? { wear: entry.wear } : null;
+    if (Array.isArray(o)) return { wear: o };
+    if (typeof o === 'string') return { wear: [o] };
+    return o;
 }
 
-/**
- * Clothing the character just got: items in "wear" (and an optional "add" list) that are not in the wardrobe yet.
- * E.g. {"wear": ["blue_silk_dress"]} for a dress they were given. Returns raw items for buildWardrobe():
- * the id the model used is kept, so its "wear" reference finds the new item. "nothing" and placeholder ids are skipped.
- */
-export function newClothingIn(change, wardrobe) {
-    if (!change || typeof change !== 'object') return [];
-    const list = v => (Array.isArray(v) ? v : (v ? [v] : []));
-    const out = [];
-    const seen = new Set();
-    for (const raw of [...list(change.add), ...list(change.wear)]) {
-        const ref = String(itemRef(raw) ?? '').trim();
-        if (!ref || NOTHING.test(ref) || PLACEHOLDER.test(ref) || findItem(wardrobe, ref) || seen.has(normalize(ref))) continue;
-        seen.add(normalize(ref));
-        const obj = raw && typeof raw === 'object' ? raw : {};
-        out.push({ id: obj.id ?? (/\s/.test(ref) ? undefined : ref), name: obj.name ? String(obj.name) : nameFromRef(ref), slots: obj.slots ?? obj.slot, note: obj.note });
-    }
-    return out;
-}
-
-export function applyOutfitChange(outfit, wardrobe, change, conditions) {
-    let cur = Array.isArray(outfit) ? outfit.map(x => ({ ...x })) : [];
-    const rejected = [];
-    if (!change || typeof change !== 'object') return { outfit: cur, rejected };
-    const defCond = conditions?.[0] ?? 'Worn';
-    const list = v => (Array.isArray(v) ? v : (v ? [v] : [])).map(itemRef);
-    for (const ref of list(change.remove)) {
-        const item = findItem(wardrobe, ref);
-        if (item) cur = cur.filter(w => w.id !== item.id);
-        else if (String(ref).toLowerCase() === 'all') cur = [];
-        else rejected.push(String(ref));
-    }
-    for (const ref of list(change.wear)) {
-        if (NOTHING.test(String(ref).trim())) { cur = []; continue; } // "wear": ["nothing"] = undress
-        const r = wearItem(cur, wardrobe, ref, defCond);
-        if (r.ok) cur = r.outfit; else rejected.push(String(ref));
-    }
-    for (const [ref, cond] of Object.entries(change.condition || change.conditions || {})) {
-        const item = findItem(wardrobe, ref);
-        const w = item && cur.find(x => x.id === item.id);
-        const c = pickEnum(cond, conditions, null);
-        if (w && c) w.condition = c;
-    }
-    return { outfit: cur, rejected };
-}
-
-export function outfitFromDefault(defaultWorn, wardrobe, conditions) {
-    let cur = [];
-    for (const id of defaultWorn || []) cur = wearItem(cur, wardrobe, id, conditions?.[0] ?? 'Worn').outfit;
-    return cur;
-}
-
-/** slotKey -> [{item, condition}] */
-export function outfitBySlot(outfit, wardrobe) {
-    const map = Object.fromEntries(SLOTS.map(s => [s.key, []]));
-    for (const w of outfit || []) {
-        const item = findItem(wardrobe, w.id);
-        if (!item) continue;
-        for (const s of item.slots) if (map[s]) map[s].push({ item, condition: w.condition });
-    }
-    return map;
+/** An item in a list by id or (normalized) name. */
+export function findItem(list, ref) {
+    if (!ref) return null;
+    const r = String(ref).trim().toLowerCase();
+    const n = normalize(ref);
+    return (list || []).find(i => i.id === r) || (list || []).find(i => normalize(i.name) === n) || null;
 }
 
 function singular(w) { return w.length > 3 ? w.replace(/(es|s)$/, '') : w; }
 
-/** Find a wardrobe item by id, exact name, or loosely by words ("jeans" → "Blue Jeans"), preferring the given slot. */
-export function findItemLoose(wardrobe, ref, slot = null) {
-    const exact = findItem(wardrobe, ref);
+/** Find an item by id, exact name, or loosely by words ("jeans" → "Blue Jeans"), preferring the given slot. */
+export function findItemLoose(list, ref, slot = null) {
+    const exact = findItem(list, ref);
     if (exact) return exact;
     const n = normalize(ref);
     if (!n) return null;
     const rw = n.split(' ').map(singular);
     const match = (pool) => pool.find(i => { const nw = new Set(normalize(i.name).split(' ').map(singular)); return rw.every(w => nw.has(w)); })
         || pool.find(i => normalize(i.name).includes(n));
-    const all = wardrobe || [];
-    return (slot && match(all.filter(i => i.slots.includes(slot)))) || match(all) || null;
+    const all = list || [];
+    return (slot && match(all.filter(i => (i.slots || []).includes(slot)))) || match(all) || null;
+}
+
+/** "blue_silk_dress" → "Blue silk dress"; a name that already reads as one is kept as written. */
+export function nameFromRef(ref) {
+    const s = String(ref).trim();
+    if (/\s/.test(s) || !/[_-]/.test(s)) return s;
+    const words = s.replace(/[_-]+/g, ' ').trim();
+    return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** A new free item from a name (and optional slots). `taken(id)` keeps the id unique. */
+export function makeItem(name, slots = null, taken = () => false, note = '') {
+    const nm = nameFromRef(name);
+    const base = slugify(nm) || 'item';
+    let id = base;
+    for (let n = 2; taken(id); n++) id = `${base}_${n}`;
+    const sl = slots && (Array.isArray(slots) ? slots.length : true) ? normalizeSlots(slots) : inferSlots(nm);
+    return { id, name: nm, slots: sl, ...(note ? { note: String(note) } : {}) };
+}
+
+/**
+ * An outfit as self-contained worn items. Entries saved by older versions ({id, condition} pointing into a wardrobe)
+ * are looked up in `legacyWardrobe`; entries that cannot be resolved are dropped (as before, they were not shown).
+ */
+export function resolveOutfit(outfit, legacyWardrobe = []) {
+    const out = [];
+    for (const w of Array.isArray(outfit) ? outfit : []) {
+        if (!w) continue;
+        if (w.name) { out.push({ ...w, slots: normalizeSlots(w.slots) }); continue; }
+        const it = findItem(legacyWardrobe, w.id);
+        if (it) out.push({ id: it.id, name: it.name, slots: normalizeSlots(it.slots), ...(it.note ? { note: it.note } : {}), condition: w.condition });
+    }
+    return out;
+}
+
+function conflicts(a, b) {
+    return (a.slots || []).some(s => !STACKING_SLOTS.has(s) && (b.slots || []).includes(s));
+}
+
+/** Put on an item (object): anything occupying the same (non-stacking) slots comes off. */
+export function wearItem(outfit, item, condition) {
+    if (!item?.name) return { outfit, ok: false };
+    const next = (outfit || []).filter(w => w.id !== item.id && normalize(w.name) !== normalize(item.name) && !conflicts(w, item));
+    next.push({ id: item.id, name: item.name, slots: [...(item.slots || ['other'])], ...(item.note ? { note: item.note } : {}), condition });
+    return { outfit: next, ok: true };
+}
+
+/**
+ * Apply clothing to an outfit. Accepts everything the tracker and greeting blocks use:
+ *   "jeans" / ["jeans", "t-shirt"]               put on (replaces whatever is in the same slots)
+ *   {"name": "Jeans", "slots": ["lower_outer"]}   an item with its slots
+ *   {"lower_outer": "jeans", "feet": "none"}      per slot; "none" / "nothing" / null empties that slot
+ *   "nothing"                                    everything off
+ *   {"wear": [...], "remove": [...], "condition": {"item": "Wet"}}   explicit lists; "remove": "all"
+ *   "jeans (wet)"                                with a condition from the conditions list
+ * Items are looked up in `catalog` (known items, e.g. a wardrobe), then among what is worn; anything else becomes a new
+ * free item, unless `strict` (then it is rejected). `loose` allows word matching ("jeans" → "Blue Jeans").
+ * Returns { outfit, created: [items made up], rejected: [refs], warnings }.
+ */
+export function applyClothing(outfit, value, { conditions = ['Worn'], catalog = [], strict = false, loose = false } = {}) {
+    let cur = (outfit || []).map(x => ({ ...x }));
+    const created = [];
+    const rejected = [];
+    const warnings = [];
+    const def = conditions?.[0] ?? 'Worn';
+    const list = v => (Array.isArray(v) ? v : (v === undefined || v === null ? [] : [v]));
+    const find = (pool, ref, slot) => (loose ? findItemLoose(pool, ref, slot) : findItem(pool, ref));
+    const resolve = (raw, slot) => {
+        const obj = raw && typeof raw === 'object' ? raw : null;
+        let name = String(obj ? (obj.name ?? obj.id ?? '') : raw).trim();
+        let cond = obj?.condition ? (pickEnum(obj.condition, conditions, null) || def) : def;
+        const cm = name.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+        if (cm) { const c = pickEnum(cm[2], conditions, null); if (c) { name = cm[1].trim(); cond = c; } }
+        if (!name || PLACEHOLDER.test(name)) return null;
+        const wantSlots = obj && (obj.slots ?? obj.slot) ? normalizeSlots(obj.slots ?? obj.slot) : (slot ? [slot] : null);
+        const known = find(catalog, obj?.id ?? name, slot) || (obj?.id ? find(catalog, name, slot) : null);
+        if (known) return { item: known, cond };
+        const worn = find(cur, obj?.id ?? name, slot);
+        if (worn) return { item: worn, cond: cm || obj?.condition ? cond : (worn.condition || cond) };
+        if (strict) { rejected.push(name); return null; }
+        const taken = (id) => cur.some(w => w.id === id) || created.some(w => w.id === id) || (catalog || []).some(w => w.id === id);
+        const item = makeItem(name, wantSlots, taken, obj?.note ?? '');
+        created.push(item);
+        return { item, cond };
+    };
+    const wear = (raw, slot) => {
+        const r = resolve(raw, slot);
+        if (r) cur = wearItem(cur, r.item, r.cond).outfit;
+    };
+    const clearSlot = (slot) => { cur = cur.filter(w => !(w.slots || []).includes(slot)); };
+    const removeRef = (raw) => {
+        const ref = raw && typeof raw === 'object' ? (raw.id ?? raw.name) : raw;
+        if (/^all$/i.test(String(ref ?? '').trim())) { cur = []; return; }
+        const it = findItemLoose(cur, ref);
+        const slotKey = normalize(ref).replace(/[\s()-]+/g, '_').replace(/_+$/, '');
+        if (it) cur = cur.filter(w => w !== it);
+        else if (SLOT_KEYS.has(slotKey)) clearSlot(slotKey); // "remove": ["feet_outer"] empties that slot
+        else rejected.push(String(ref));
+    };
+    const setCondition = (ref, c) => {
+        const w = findItemLoose(cur, ref);
+        const cc = pickEnum(c, conditions, null);
+        if (w && cc) w.condition = cc; else warnings.push(`condition: could not set "${ref}" to "${c}"`);
+    };
+    const handle = (val) => {
+        if (Array.isArray(val)) { val.forEach(handle); return; }
+        if (val && typeof val === 'object') {
+            const ref = val.name ?? val.id;
+            if (ref !== undefined && ref !== null && typeof ref !== 'object') { wear(val, null); return; }
+            for (const [k, x] of Object.entries(val)) {
+                const nk = normalize(k);
+                if (nk === 'wear' || nk === 'add' || nk === 'put on') list(x).forEach(handle);
+                else if (nk === 'remove' || nk === 'take off') list(x).forEach(removeRef);
+                else if (nk === 'condition' || nk === 'conditions') { if (x && typeof x === 'object') for (const [r, c] of Object.entries(x)) setCondition(r, c); }
+                else {
+                    const slot = normalizeSlot(k);
+                    if (!slot) { warnings.push(`unknown clothing slot "${k}"`); continue; }
+                    clearSlot(slot);
+                    for (const ref of list(x)) if (!IS_NONE(ref)) wear(ref, slot);
+                }
+            }
+            return;
+        }
+        if (val === undefined || val === null || !String(val).trim()) return;
+        if (NOTHING.test(String(val).trim())) { cur = []; return; }
+        wear(val, null);
+    };
+    handle(value);
+    return { outfit: cur, created, rejected, warnings };
+}
+
+/**
+ * A tracker outfit change ({wear, remove, condition} or slot keys). Unlike greeting clothing, item names are matched
+ * exactly (id or name) so the model's references stay unambiguous. Returns { outfit, created, rejected }.
+ */
+export function applyOutfitChange(outfit, change, { conditions = ['Worn'], catalog = [], strict = false } = {}) {
+    if (!change || typeof change !== 'object') return { outfit: (outfit || []).map(x => ({ ...x })), created: [], rejected: [] };
+    const r = applyClothing(outfit, change, { conditions, catalog, strict, loose: false });
+    return { outfit: r.outfit, created: r.created, rejected: r.rejected };
+}
+
+/** Starting outfit of a template / persona: its own `outfit`, else (older data) its starred wardrobe items. */
+export function startingOutfit(t, conditions = ['Worn']) {
+    if (Array.isArray(t?.outfit)) return resolveOutfit(t.outfit, t.wardrobe || []);
+    let cur = [];
+    for (const id of t?.defaultWorn || []) {
+        const it = findItem(t.wardrobe || [], id);
+        if (it) cur = wearItem(cur, it, conditions?.[0] ?? 'Worn').outfit;
+    }
+    return cur;
+}
+
+/** slotKey -> [{item, condition}] for self-contained worn items. */
+export function outfitBySlot(outfit) {
+    const map = Object.fromEntries(SLOTS.map(s => [s.key, []]));
+    for (const w of outfit || []) {
+        if (!w?.name) continue;
+        for (const s of w.slots || []) if (map[s]) map[s].push({ item: w, condition: w.condition });
+    }
+    return map;
 }
 
 /**
  * Plain-language exposure summary from what is worn, e.g. "completely naked", "topless, barefoot",
  * "in underwear only". Returns '' when nothing notable is exposed.
  */
-export function exposureSummary(outfit, wardrobe) {
-    const by = outfitBySlot(outfit, wardrobe);
+export function exposureSummary(outfit) {
+    const by = outfitBySlot(outfit);
     const has = (k) => (by[k] || []).length > 0;
     const anything = SLOTS.some(s => has(s.key));
     if (!anything) return 'completely naked';

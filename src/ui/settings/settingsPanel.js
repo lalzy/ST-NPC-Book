@@ -1,6 +1,6 @@
 // Extension settings panel (settings.html) bindings.
 
-import { DEFAULT_ASSIST_CARD_PROMPT, DEFAULT_ASSIST_WARDROBE_PROMPT, DEFAULT_INSTRUCTIONS, DEFAULT_OUTFIT_RULES, DEFAULT_PORTRAIT_LLM_PROMPT, DEFAULT_RELATIONSHIP_RULE, DEFAULT_SPEAKER_REMINDER, DEFAULT_SPEAKER_RULE, EXT_FOLDER } from '../../constants.js';
+import { DEFAULT_ASSIST_CARD_PROMPT, DEFAULT_INSTRUCTIONS, DEFAULT_OUTFIT_RULES, DEFAULT_PORTRAIT_LLM_PROMPT, DEFAULT_SPEAKER_REMINDER, DEFAULT_SPEAKER_RULE, EXT_FOLDER } from '../../constants.js';
 import { ctx } from '../../core/context.js';
 import { save, settings } from '../../core/settings.js';
 import { esc } from '../../core/utils.js';
@@ -63,12 +63,7 @@ export async function mountSettings() {
     root.find('#npcb_speakerportraits, #npcb_speakersize, #npcb_enabled').on('input change', () => { applyCardStyle(); decorateAll(); });
     bind('#npcb_trackoutfits', 'trackOutfits', 'checkbox');
     bind('#npcb_exposure', 'describeExposure', 'checkbox');
-    bind('#npcb_incwardrobe', 'includeWardrobe', 'checkbox');
-    bind('#npcb_wdgrowth', 'allowWardrobeGrowth', 'checkbox');
     bind('#npcb_conditions', 'conditions', 'list');
-    bind('#npcb_relationships', 'trackRelationships', 'checkbox');
-    bind('#npcb_attitudes', 'attitudes', 'list');
-    bind('#npcb_reltypes', 'relationshipTypes', 'list');
     bind('#npcb_threshold', 'threshold', 'number');
     bind('#npcb_tolerance', 'numericTolerance', 'number');
     bind('#npcb_traitkeys', 'traitKeys', 'list');
@@ -102,13 +97,11 @@ export async function mountSettings() {
 /** Prompt texts edited in a popup: settings key → title, default, placeholder hint, and what to refresh after saving. */
 const PROMPT_EDITORS = {
     instructions: { title: 'Tracking prompt', def: DEFAULT_INSTRUCTIONS, hint: 'Placeholders: [[EXCLUDE]] [[MAX_NEW]] [[SPEAKER_RULE]] [[OUTFIT_RULES]] [[USER_EXAMPLE]] [[USER]] [[CHAR]] [[POSTURES]] [[STATES]] [[TRAIT_KEYS]] [[TRAIT_EXAMPLE]] [[LIBRARY]]. The LLM must answer with an <npcs>[...]</npcs> JSON block.' },
-    outfitRules: { title: 'Clothing rules', def: DEFAULT_OUTFIT_RULES, hint: 'Inserted at [[OUTFIT_RULES]]. Placeholders: [[CONDITIONS]] [[SLOTS]].' },
-    relationshipRule: { title: 'Relationship rule', def: DEFAULT_RELATIONSHIP_RULE, hint: 'Added to [[OUTFIT_RULES]] while relationships are tracked. Placeholders: [[REL_TYPES]] [[ATTITUDES]] [[USER]].' },
+    outfitRules: { title: 'Clothing rules', def: DEFAULT_OUTFIT_RULES, hint: 'Inserted at [[OUTFIT_RULES]] (sister extensions add their rules there too). Placeholders: [[CONDITIONS]] [[SLOTS]].' },
     speakerRule: { title: 'Speaker rule', def: DEFAULT_SPEAKER_RULE, hint: 'Inserted at [[SPEAKER_RULE]]. The LLM wraps each character\'s part in <npc id="ID">…</npc>.' },
     speakerReminder: { title: 'Speaker reminder', def: DEFAULT_SPEAKER_REMINDER, hint: 'Sent right before every reply (in chat, depth 0). [[IDS]] = ids of the characters in the scene. Empty = off.' },
     portraitLlmPrompt: { title: 'Portrait LLM instruction', def: DEFAULT_PORTRAIT_LLM_PROMPT, hint: 'Placeholders: {{name}}/{{char}} {{traits}} {{details}} {{outfit}} {{posture}} {{state}}. The NPC\'s data and the latest story messages are sent along with it.' },
     assistCardPrompt: { title: 'Card assist prompt', def: DEFAULT_ASSIST_CARD_PROMPT, hint: 'System prompt for ✨ Assist on the Card tab.' },
-    assistWardrobePrompt: { title: 'Wardrobe assist prompt', def: DEFAULT_ASSIST_WARDROBE_PROMPT, hint: 'System prompt for ✨ Assist on the Wardrobe tab.' },
 };
 
 async function openPromptEditor(key) {

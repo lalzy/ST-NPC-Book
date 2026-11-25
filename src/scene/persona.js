@@ -1,26 +1,26 @@
-// Persona (user) scene state: wardrobe data, current posture and outfit.
+// Persona (user) scene state: starting outfit, current posture and outfit.
 
 import { user_avatar } from '../../../../../personas.js';
 import { ctx, meta } from '../core/context.js';
 import { runtime } from '../core/runtime.js';
 import { settings } from '../core/settings.js';
-import { outfitFromDefault } from '../logic/outfit.js';
+import { startingOutfit } from '../logic/outfit.js';
 import { snapOf } from './roster.js';
 
 // ── persona ("user") state ──
 export function personaKey() { return user_avatar || ''; }
 export function personaData(key = personaKey()) {
     const s = settings();
-    if (!s.personas[key]) s.personas[key] = { wardrobe: [], defaultWorn: [] };
+    if (!s.personas[key]) s.personas[key] = { outfit: [] };
     const p = s.personas[key];
-    p.wardrobe = p.wardrobe || [];
-    p.defaultWorn = p.defaultWorn || [];
+    // Older data: a starting outfit as starred wardrobe items (`wardrobe` + `defaultWorn`) becomes self-contained items.
+    if (!Array.isArray(p.outfit)) p.outfit = startingOutfit(p, s.conditions);
     return p;
 }
 function freshUser(prev) {
     const s = settings();
     const p = personaData();
-    const outfit = outfitFromDefault(p.defaultWorn, p.wardrobe, s.conditions);
+    const outfit = startingOutfit(p, s.conditions);
     return { persona: personaKey(), posture: prev?.posture ?? s.postures[0] ?? '', outfit, dressed: outfit.length > 0 };
 }
 /**

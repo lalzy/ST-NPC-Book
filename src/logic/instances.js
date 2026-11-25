@@ -2,13 +2,12 @@
 // Chat scene model: instances owned by the chat, and the list of which ones are active.
 //
 //   Template  = NPC Library card: a blueprint, only read when a chat first needs that NPC.
-//   Instance  = the chat's own full copy of a template (card fields, wardrobe, ext data + live state). Drifts freely.
+//   Instance  = the chat's own full copy of a template (card fields, ext data + live state incl. outfit). Drifts freely.
 //   Active    = ids of the instances in the scene right now (what is sent to the LLM). Holds no data.
 //
 // Scene shape: { instances: { [id]: Instance }, active: [id] }
 
-import { outfitFromDefault } from './outfit.js';
-import { relationshipsForInstance } from './relationships.js';
+import { startingOutfit } from './outfit.js';
 
 /**
  * Template-only fields, not copied into an instance: library bookkeeping, and the starting outfit
@@ -40,20 +39,25 @@ export function activeInstances(scene) {
     return sc.active.map(id => sc.instances[id]).filter(Boolean);
 }
 
-/** A new instance: a 1:1 copy of the template at this moment, plus the starting live state. */
-export function instanceFromTemplate(template, { postures = [], states = [], conditions = ['Worn'] } = {}) {
+/**
+ * A new instance: a 1:1 copy of the template at this moment, plus the starting live state.
+ * onCreate(instance, template), if given, may adjust it (sister extensions set up their per-chat data there).
+ */
+export function instanceFromTemplate(template, { postures = [], states = [], conditions = ['Worn'], onCreate = null } = {}) {
     const card = JSON.parse(JSON.stringify(template));
     for (const k of TEMPLATE_ONLY_KEYS) delete card[k];
-    card.wardrobe = card.wardrobe || [];
-    card.relationships = relationshipsForInstance(card.relationships);
-    return {
+    const outfit = startingOutfit(template, conditions);
+    const inst = {
         ...card,
         instanceOf: template.id,
         posture: postures[0] ?? '',
         state: states[0] ?? '',
         feelings: '',
-        outfit: outfitFromDefault(template.defaultWorn || [], card.wardrobe, conditions),
+        outfit,
+        dressed: outfit.length > 0 || !!template.dressed,
     };
+    if (typeof onCreate === 'function') onCreate(inst, template);
+    return inst;
 }
 
 /**

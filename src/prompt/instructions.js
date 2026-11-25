@@ -3,19 +3,18 @@
 import { DEFAULT_USER_RULE, TRAIT_SAMPLES } from '../constants.js';
 import { ctx, excludedNames, hasChat } from '../core/context.js';
 import { traitSummary } from '../core/npcs.js';
+import { extsWith, pipe } from '../core/extHooks.js';
 import { extensions } from '../core/runtime.js';
 import { lib, settings } from '../core/settings.js';
 import { unusedTemplates } from '../logic/instances.js';
 import { resolveRef } from '../logic/matching.js';
-import { relationshipTypeNames } from '../logic/relationships.js';
 import { SLOTS } from '../logic/slots.js';
 import { normalize } from '../logic/text.js';
 import { promptScene } from '../scene/roster.js';
 
 function extInstructions() {
     const out = [];
-    for (const ext of extensions.values()) {
-        if (typeof ext.instructions !== 'function') continue;
+    for (const ext of extsWith('instructions')) {
         try { const t = ext.instructions({ autoCreate: settings().autoCreate }); if (t) out.push(String(t)); } catch (e) { console.warn(e); }
     }
     return out;
@@ -34,9 +33,9 @@ export function buildInstructionText() {
         ...Object.values(scene.instances).sort(byName).map(line),
         ...(s.includeLibrary ? Object.values(unusedTemplates(scene, lib())).sort(byName).map(line) : []),
     ];
-    return String(s.instructions || '')
+    const text = String(s.instructions || '')
         .replaceAll('[[SPEAKER_RULE]]', s.enabled && s.speakerPortraits ? s.speakerRule : '')
-        .replaceAll('[[OUTFIT_RULES]]', [s.trackOutfits ? s.outfitRules : '', s.trackUser ? DEFAULT_USER_RULE : '', s.trackRelationships ? s.relationshipRule : '', ...extInstructions()].filter(Boolean).join('\n'))
+        .replaceAll('[[OUTFIT_RULES]]', [s.trackOutfits ? s.outfitRules : '', s.trackUser ? DEFAULT_USER_RULE : '', ...extInstructions()].filter(Boolean).join('\n'))
         .replaceAll('[[USER_EXAMPLE]]', s.trackUser ? `,\n  {"id": "user", "posture": "${s.postures[1] ?? s.postures[0] ?? 'Sitting'}"}` : '')
         .replaceAll('[[MAX_NEW]]', String(Number(s.maxNewPerReply) > 0 ? Number(s.maxNewPerReply) : 2))
         .replaceAll('[[CONDITIONS]]', s.conditions.join(', '))
@@ -48,9 +47,26 @@ export function buildInstructionText() {
         .replaceAll('[[STATES]]', s.states.join(', '))
         .replaceAll('[[TRAIT_KEYS]]', keys.join(', '))
         .replaceAll('[[TRAIT_EXAMPLE]]', keys.map(k => `"${k}": "${TRAIT_SAMPLES[normalize(k)] ?? 'unknown'}"`).join(', '))
-        .replaceAll('[[ATTITUDES]]', (s.attitudes || []).join(', '))
-        .replaceAll('[[REL_TYPES]]', relationshipTypeNames(s.relationshipTypes).join(', '))
         .replaceAll('[[LIBRARY]]', libLines.length ? libLines.join('\n') : '(none yet)');
+    // Sister extensions: their own [[PLACEHOLDERS]], then transformInstructions. Without any, the text is unchanged.
+    return String(pipe('transformInstructions', extPlaceholders(text), { autoCreate: s.autoCreate }) ?? '');
+}
+
+/** Fill [[KEY]] placeholders that sister extensions define (def.placeholders = { KEY: () => string }). */
+function extPlaceholders(text) {
+    let out = text;
+    for (const ext of extensions.values()) {
+        const ph = ext?.placeholders;
+        if (!ph || typeof ph !== 'object') continue;
+        for (const [key, fn] of Object.entries(ph)) {
+            const tag = `[[${key}]]`;
+            if (!out.includes(tag)) continue;
+            let v = '';
+            try { v = typeof fn === 'function' ? fn() : fn; } catch (e) { console.warn(`[NPC Book] extension ${ext.id} placeholder ${key} failed`, e); }
+            out = out.replaceAll(tag, String(v ?? ''));
+        }
+    }
+    return out;
 }
 
 /** Ids of the characters the next reply may voice: the scene, plus the main character when it is tracked. */
