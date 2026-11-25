@@ -115,7 +115,7 @@ See **[EXTENDING.md](EXTENDING.md)** for the full guide and API, and [`examples/
 ## Existing sister extensions:
 - [Wardrobe](https://github.com/lalzy/ST-NPC-Book-wardrobe): each NPC and your persona owns a wardrobe; outfits are limited to it, it is sent to the AI, new NPCs get one, and ✨ Generate fills it.
 - [Relationships](https://github.com/lalzy/ST-NPC-Book-relationships): who knows whom and how they feel, with a web/tree view; tracked per chat by the AI.
-- [Gurps Stat-sheet](https://github.com/lalzy/ST-NPC-Book-Gurps)
+- [Character Stat-sheet](https://github.com/lalzy/ST-NPCBook-Character-Sheets): designed primarily for Gurps (but with rules etc stripped out, so should be mostly generic-capable).
 
 
 

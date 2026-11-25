@@ -4,7 +4,7 @@ NPC Book can be extended by other SillyTavern extensions ("sister extensions"). 
 
 Typical uses:
 
-- **Stat sheets** for a game system (Ironsworn, D&D, GURPS, your own).
+- **Stat sheets** for a game system (Ironsworn, D&D, GURPS®, your own).
 - **One extra tracked field**, such as occupation, faction, hunger or reputation.
 - **Prompt tweaks**, such as rewriting the scene text or adding your own `[[PLACEHOLDERS]]` to the tracking prompt.
 

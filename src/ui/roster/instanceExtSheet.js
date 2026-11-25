@@ -25,5 +25,5 @@ export async function openInstanceExtSheet(id, extId) {
     target.ext[extId] = data;
     writeCurrentScene(scene);
     sheetSaved(x, 'cardTab', { id, scope: 'instance', data });
-    toastr.success(`Saved ${inst.name}'s ${x.cardTab.label || x.id} sheet for this chat.`, 'NPC Book');
+    toastr.success(`Saved ${inst.name}'s ${x.sheetLabel || `${x.cardTab.label || x.id} sheet`} for this chat.`, 'NPC Book');
 }

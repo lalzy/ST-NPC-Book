@@ -29,5 +29,5 @@ export async function openTemplateExtSheet(id, extId) {
     sheetSaved(x, 'cardTab', { id, scope: 'template', data });
     updateAutoInjection();
     if ($('#npcb_library').is(':visible') && libState.selected === id) selectTemplate(id, false, `ext:${extId}`);
-    toastr.success(`Saved ${t.name}'s ${x.cardTab.label || x.id} sheet.`, 'NPC Book');
+    toastr.success(`Saved ${t.name}'s ${x.sheetLabel || `${x.cardTab.label || x.id} sheet`}.`, 'NPC Book');
 }
