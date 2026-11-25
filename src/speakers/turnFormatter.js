@@ -9,7 +9,8 @@ import { xa } from '../core/utils.js';
  *   <div data-npcb-turn="ID"><div data-npcb-ava></div><div data-npcb-body>…</div></div> The tags are swapped for plain-text markers before Markdown runs (so the content inside is
  * formatted normally), and the markers are turned into the divs afterwards. The stored message keeps the tags.
  */
-const TURN_OPEN_RE = /<npc\s+id\s*=\s*["']?([^"'>\s]+)["']?\s*>/gi;
+// Extra attributes a model may wrongly add after the id are ignored here (the tracker also strips them from the message).
+const TURN_OPEN_RE = /<npc\s+id\s*=\s*["']?([^"'>\s]+)["']?(?:\s+[\w-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))*\s*>/gi;
 const TURN_CLOSE_RE = /<\/npc\s*>/gi;
 const TURN_PARTIAL_RE = /<\/?n(?:p(?:c(?:\s[^>]*)?)?)?$/i; // half-streamed tag at the very end
 const toHex = (str) => Array.from(new TextEncoder().encode(str), b => b.toString(16).padStart(2, '0')).join('');

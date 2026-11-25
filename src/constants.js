@@ -16,6 +16,108 @@ Write your reply as usual. Then, at the very end, add one <npcs> block that reco
 
 Put in the block:
 - A character already in the scene whose posture, state, feelings or clothing changed in your reply: their "id" and only the fields that changed. Compare with the scene: if a character's mood in your reply no longer matches their listed state (listed Calm, but your reply shows cold anger), that is a change, so give the new state.
+- A character who arrived: their "id" from Known NPCs, plus "posture" and "state". Anyone else (or a different person who shares a name) gets "id": "to_be_allocated" (with more than one new character in a reply: "to_be_allocated_2", "to_be_allocated_3"), "name" and "new": true, plus "traits" with [[TRAIT_KEYS]], the profile fields, and an "outfit" for what they wear now (clothing that fits their role: a guard wears armor, a uniform, boots), as in the example. Bring in whoever the story needs; you do not need a list to do so. Their speaker block is <npc id="to_be_allocated">...</npc>; the real id is filled in afterwards. A speaker tag holds ONLY the id: never put name, traits, posture, outfit or any other data in it. All character data goes in the <npcs> block.
+- Track characters who matter: anyone with a name, and the first individual who speaks to or deals directly with [[USER]] (the guard who stops them at the gate, the innkeeper, a shopkeeper). Name an unnamed one by role, e.g. "Gate Guard". Guards, patrons and townsfolk who only watch or stand around are background: leave them out. At most [[MAX_NEW]] new characters per reply.
+- A character who left: {"id": "...", "left": true}.
+- Report only what your reply actually shows. Leave out everyone and everything that did not change.
+- Every reply ends with the <npcs> block, even when nothing changed: write <npcs>[]</npcs>. A reply without it is incomplete.
+- Never list [[EXCLUDE]].
+
+Values:
+- "posture" is one of: [[POSTURES]]
+- "state" is one of: [[STATES]]
+- "feelings" is the character's private thoughts right now, 1-2 sentences.
+[[SPEAKER_RULE]]
+[[OUTFIT_RULES]]
+
+Example:
+<npcs>
+[
+  {"id": "existing_id", "posture": "Sitting"},
+  {"id": "other_id", "left": true},
+    {"id": "to_be_allocated", "name": "Mara", "new": true, "traits": {[[TRAIT_EXAMPLE]]}, "posture": "Standing", "state": "Curious", "feelings": "Who are these people?", "description": "Traveling herbalist.", "details": "Lean, sun-browned, grey-streaked braid. Blunt and practical, distrusts nobles. Grew up in the hill villages; speaks in short sentences.", "height": "168 cm", "pronouns": "she/her", "sexuality": "heterosexual", "sexual_experience": "experienced", "outfit": {"wear": [{"name": "Green wool dress", "slots": ["upper_outer", "lower_outer"]}, {"name": "Linen shift", "slots": ["upper_inner", "lower_inner"]}, {"name": "Leather boots", "slots": ["feet_outer"]}, {"name": "Herb satchel", "slots": ["other"]}]}}[[USER_EXAMPLE]]
+]
+</npcs>
+
+Known NPCs, people this story has already met (id: name; their details appear in the scene when they are present):
+[[LIBRARY]]
+</npc_tracking_switch >`;
+
+/** The default tracking prompt with the "generated" placeholder id: unedited saved copies move to the new default. */
+export const DEFAULT_INSTRUCTIONS_V5 = `
+<npc_tracking_switch state=enabled>
+Write your reply as usual. Then, at the very end, add one <npcs> block that records what CHANGED in the scene during your reply. Do not explain or plan the block; just write it.
+
+Put in the block:
+- A character already in the scene whose posture, state, feelings or clothing changed in your reply: their "id" and only the fields that changed. Compare with the scene: if a character's mood in your reply no longer matches their listed state (listed Calm, but your reply shows cold anger), that is a change, so give the new state.
+- A character who arrived: their "id" from Known NPCs, plus "posture" and "state". Anyone else (or a different person who shares a name) gets "id": "generated" (with more than one new character in a reply: "generated_2", "generated_3"), "name" and "new": true, plus "traits" with [[TRAIT_KEYS]], the profile fields, and an "outfit" for what they wear now (clothing that fits their role: a guard wears armor, a uniform, boots), as in the example. Bring in whoever the story needs; you do not need a list to do so. Use the same "generated" id in the new character's speaker block; it is replaced with the real id afterwards.
+- Track characters who matter: anyone with a name, and the first individual who speaks to or deals directly with [[USER]] (the guard who stops them at the gate, the innkeeper, a shopkeeper). Name an unnamed one by role, e.g. "Gate Guard". Guards, patrons and townsfolk who only watch or stand around are background: leave them out. At most [[MAX_NEW]] new characters per reply.
+- A character who left: {"id": "...", "left": true}.
+- Report only what your reply actually shows. Leave out everyone and everything that did not change.
+- Every reply ends with the <npcs> block, even when nothing changed: write <npcs>[]</npcs>. A reply without it is incomplete.
+- Never list [[EXCLUDE]].
+
+Values:
+- "posture" is one of: [[POSTURES]]
+- "state" is one of: [[STATES]]
+- "feelings" is the character's private thoughts right now, 1-2 sentences.
+[[SPEAKER_RULE]]
+[[OUTFIT_RULES]]
+
+Example:
+<npcs>
+[
+  {"id": "existing_id", "posture": "Sitting"},
+  {"id": "other_id", "left": true},
+    {"id": "generated", "name": "Mara", "new": true, "traits": {[[TRAIT_EXAMPLE]]}, "posture": "Standing", "state": "Curious", "feelings": "Who are these people?", "description": "Traveling herbalist.", "details": "Lean, sun-browned, grey-streaked braid. Blunt and practical, distrusts nobles. Grew up in the hill villages; speaks in short sentences.", "height": "168 cm", "pronouns": "she/her", "sexuality": "heterosexual", "sexual_experience": "experienced", "outfit": {"wear": [{"name": "Green wool dress", "slots": ["upper_outer", "lower_outer"]}, {"name": "Linen shift", "slots": ["upper_inner", "lower_inner"]}, {"name": "Leather boots", "slots": ["feet_outer"]}, {"name": "Herb satchel", "slots": ["other"]}]}}[[USER_EXAMPLE]]
+]
+</npcs>
+
+Known NPCs, people this story has already met (id: name; their details appear in the scene when they are present):
+[[LIBRARY]]
+</npc_tracking_switch >`;
+
+/** The default tracking prompt before new characters got the temporary id "generated": unedited saved copies move to the new default. */
+export const DEFAULT_INSTRUCTIONS_V4 = `
+<npc_tracking_switch state=enabled>
+Write your reply as usual. Then, at the very end, add one <npcs> block that records what CHANGED in the scene during your reply. Do not explain or plan the block; just write it.
+
+Put in the block:
+- A character already in the scene whose posture, state, feelings or clothing changed in your reply: their "id" and only the fields that changed. Compare with the scene: if a character's mood in your reply no longer matches their listed state (listed Calm, but your reply shows cold anger), that is a change, so give the new state.
+- A character who arrived: their "id" from Known NPCs, plus "posture" and "state". Anyone else (or a different person who shares a name) gets "name" and "new": true, plus "traits" with [[TRAIT_KEYS]], the profile fields, and an "outfit" for what they wear now (clothing that fits their role: a guard wears armor, a uniform, boots), as in the example. Bring in whoever the story needs; you do not need a list to do so.
+- Track characters who matter: anyone with a name, and the first individual who speaks to or deals directly with [[USER]] (the guard who stops them at the gate, the innkeeper, a shopkeeper). Name an unnamed one by role, e.g. "Gate Guard". Guards, patrons and townsfolk who only watch or stand around are background: leave them out. At most [[MAX_NEW]] new characters per reply.
+- A character who left: {"id": "...", "left": true}.
+- Report only what your reply actually shows. Leave out everyone and everything that did not change.
+- Every reply ends with the <npcs> block, even when nothing changed: write <npcs>[]</npcs>. A reply without it is incomplete.
+- Never list [[EXCLUDE]].
+
+Values:
+- "posture" is one of: [[POSTURES]]
+- "state" is one of: [[STATES]]
+- "feelings" is the character's private thoughts right now, 1-2 sentences.
+[[SPEAKER_RULE]]
+[[OUTFIT_RULES]]
+
+Example:
+<npcs>
+[
+  {"id": "existing_id", "posture": "Sitting"},
+  {"id": "other_id", "left": true},
+    {"name": "Mara", "new": true, "traits": {[[TRAIT_EXAMPLE]]}, "posture": "Standing", "state": "Curious", "feelings": "Who are these people?", "description": "Traveling herbalist.", "details": "Lean, sun-browned, grey-streaked braid. Blunt and practical, distrusts nobles. Grew up in the hill villages; speaks in short sentences.", "height": "168 cm", "pronouns": "she/her", "sexuality": "heterosexual", "sexual_experience": "experienced", "outfit": {"wear": [{"name": "Green wool dress", "slots": ["upper_outer", "lower_outer"]}, {"name": "Linen shift", "slots": ["upper_inner", "lower_inner"]}, {"name": "Leather boots", "slots": ["feet_outer"]}, {"name": "Herb satchel", "slots": ["other"]}]}}[[USER_EXAMPLE]]
+]
+</npcs>
+
+Known NPCs, people this story has already met (id: name; their details appear in the scene when they are present):
+[[LIBRARY]]
+</npc_tracking_switch >`;
+
+/** The default tracking prompt while library NPCs were listed for the LLM: saved settings that still hold it exactly move to the new default. */
+export const DEFAULT_INSTRUCTIONS_V3 = `
+<npc_tracking_switch state=enabled>
+Write your reply as usual. Then, at the very end, add one <npcs> block that records what CHANGED in the scene during your reply. Do not explain or plan the block; just write it.
+
+Put in the block:
+- A character already in the scene whose posture, state, feelings or clothing changed in your reply: their "id" and only the fields that changed. Compare with the scene: if a character's mood in your reply no longer matches their listed state (listed Calm, but your reply shows cold anger), that is a change, so give the new state.
 - A character who arrived: their "id" from Known NPCs, plus "posture" and "state". Someone not in Known NPCs (or a different person who shares a name) gets "name" and "new": true, plus "traits" with [[TRAIT_KEYS]], the profile fields, and an "outfit" for what they wear now (clothing that fits their role: a guard wears armor, a uniform, boots), as in the example.
 - Track characters who matter: anyone with a name, and the first individual who speaks to or deals directly with [[USER]] (the guard who stops them at the gate, the innkeeper, a shopkeeper). Name an unnamed one by role, e.g. "Gate Guard". Guards, patrons and townsfolk who only watch or stand around are background: leave them out. At most [[MAX_NEW]] new characters per reply.
 - A character who left: {"id": "...", "left": true}.
@@ -122,7 +224,8 @@ export const DEFAULT_OUTFIT_RULES_V2 = `Clothing:
 
 
 
-export const DEFAULT_SPEAKER_RULE = `Speaker blocks (mandatory in every reply):
+/** The speaker rule before it said the tag holds only the id: unedited saved copies move to the new default. */
+export const DEFAULT_SPEAKER_RULE_V1 = `Speaker blocks (mandatory in every reply):
 - Everything a character does or says goes inside <npc id="ID">...</npc>: their actions, the narration about them, and all of their dialogue. Use their exact id from the scene.
 - Open a new block every time the focus moves to another character. Only narration that belongs to no character (setting, weather, time passing) may stand outside a block. Never nest blocks.
 - Write dialogue in plain double quotes, without HTML or font tags.
@@ -131,7 +234,19 @@ The fire crackles in the hearth.
 <npc id="ada">Ada sets down the kettle. "You should rest."</npc>
 <npc id="bram">Bram folds his arms. "He's fine."</npc>`;
 
-export const DEFAULT_SPEAKER_REMINDER = `[Reminder: put each character's part of this reply inside <npc id="ID">...</npc>. Characters in the scene: [[IDS]]. Only narration that belongs to no one stays outside the blocks.]`;
+export const DEFAULT_SPEAKER_RULE = `Speaker blocks (mandatory in every reply):
+- Everything a character does or says goes inside <npc id="ID">...</npc>: their actions, the narration about them, and all of their dialogue. Use their exact id from the scene; a new character uses <npc id="to_be_allocated"> until it has one.
+- The tag holds only id="...", nothing else. Never add name, new, posture, traits, outfit or any other attribute to it; that data belongs in the <npcs> block.
+- Open a new block every time the focus moves to another character. Only narration that belongs to no character (setting, weather, time passing) may stand outside a block. Never nest blocks.
+- Write dialogue in plain double quotes, without HTML or font tags.
+- A reply without speaker blocks is wrong. Example of a correct reply (the ids are examples):
+The fire crackles in the hearth.
+<npc id="ada">Ada sets down the kettle. "You should rest."</npc>
+<npc id="bram">Bram folds his arms. "He's fine."</npc>`;
+
+export const DEFAULT_SPEAKER_REMINDER_V1 = `[Reminder: put each character's part of this reply inside <npc id="ID">...</npc>. Characters in the scene: [[IDS]]. Only narration that belongs to no one stays outside the blocks.]`;
+
+export const DEFAULT_SPEAKER_REMINDER = `[Reminder: put each character's part of this reply inside <npc id="ID">...</npc>. Characters in the scene: [[IDS]]. A new character uses <npc id="to_be_allocated">. The tag holds only the id, never other data. Only narration that belongs to no one stays outside the blocks.]`;
 
 export const DEFAULT_ASSIST_CARD_PROMPT = `You help write character cards for NPCs in a roleplay.
 - Write only the fields you are asked for, in the language of the request.
@@ -222,7 +337,7 @@ export const DEFAULTS = {
     instructions: DEFAULT_INSTRUCTIONS,
     sceneHeader: '',
     personaInUser: true,
-    includeLibrary: true,
+    nameMatch: 70, // how close (%) a new character's name must be to a known one before the user is asked who it is
     threshold: 50,
     numericTolerance: 2,
     autoCreate: true,

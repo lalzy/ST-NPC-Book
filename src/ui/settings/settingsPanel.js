@@ -43,7 +43,6 @@ export async function mountSettings() {
     bind('#npcb_instr_depth', 'instrDepth', 'number');
     bind('#npcb_instr_role', 'instrRole', 'number');
     bind('#npcb_header', 'sceneHeader');
-    bind('#npcb_include_lib', 'includeLibrary', 'checkbox');
     bind('#npcb_autocreate', 'autoCreate', 'checkbox');
     bind('#npcb_autofolder', 'autoFolder');
     bind('#npcb_maxnew', 'maxNewPerReply', 'number');
@@ -65,12 +64,15 @@ export async function mountSettings() {
     bind('#npcb_exposure', 'describeExposure', 'checkbox');
     bind('#npcb_conditions', 'conditions', 'list');
     bind('#npcb_threshold', 'threshold', 'number');
+    bind('#npcb_namematch', 'nameMatch', 'number');
     bind('#npcb_tolerance', 'numericTolerance', 'number');
     bind('#npcb_traitkeys', 'traitKeys', 'list');
     bind('#npcb_postures', 'postures', 'list');
     bind('#npcb_states', 'states', 'list');
     root.find('#npcb_threshold').on('input', () => root.find('#npcb_threshold_val').text(`${s.threshold}%`));
     root.find('#npcb_threshold_val').text(`${s.threshold}%`);
+    root.find('#npcb_namematch').on('input', () => root.find('#npcb_namematch_val').text(`${s.nameMatch}%`));
+    root.find('#npcb_namematch_val').text(`${s.nameMatch}%`);
     root.find('#npcb_install_pm').on('click', installPmEntries);
     root.find('#npcb_open_lib').on('click', () => openLibrary());
     root.find('#npcb_preview').on('click', async () => {

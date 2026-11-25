@@ -209,3 +209,20 @@
 .npcb-roster-ext { display: inline-flex; align-items: center; gap: 8px; }
 .npcb-roster-ext:empty { display: none !important; }
 .npcb-roster-ext .npcb-ext-off { opacity: .35; }
+
+/* "Who is this?" popup: the LLM's new character, then the best matches */
+.npcb-match { text-align: left; display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.npcb-match-head { margin-bottom: 4px; }
+.npcb-match-label { font-size: .8em; text-transform: uppercase; letter-spacing: .05em; opacity: .7; margin-top: 4px; }
+.npcb-match-list { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.npcb-match-card { display: flex; flex-direction: row; align-items: center; gap: 12px; width: 100%; box-sizing: border-box; padding: 8px 12px; border: 1px solid var(--SmartThemeBorderColor, #555); border-radius: 10px; background: var(--SmartThemeBlurTintColor, rgba(0,0,0,.2)); cursor: pointer; text-align: left; }
+.npcb-match-card:hover, .npcb-match-card:focus { outline: 2px solid var(--SmartThemeQuoteColor, #6a6); }
+.npcb-match-new { border-style: dashed; }
+.npcb-match-card .npcb-ava { width: 48px; height: 48px; flex: none; }
+.npcb-match-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.npcb-match-traits { font-size: .85em; opacity: .85; }
+.npcb-match-desc { font-size: .8em; opacity: .7; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.npcb-match-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: .85em; }
+.npcb-match-side small { opacity: .7; }
+.npcb-match-tag { font-weight: bold; white-space: nowrap; }
+.npcb-match-tag-new { color: var(--SmartThemeQuoteColor, #6a6); }

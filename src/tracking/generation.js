@@ -11,17 +11,77 @@ import { clone, sig } from '../core/utils.js';
 import { attachInstance, cloneScene, toScene } from '../logic/instances.js';
 import { resolveRef } from '../logic/matching.js';
 import { applyOutfitChange, normOutfitChange, resolveOutfit } from '../logic/outfit.js';
-import { normalize, pickEnum } from '../logic/text.js';
-import { applyTracker } from '../logic/trackerApply.js';
+import { cleanId, normalize, pickEnum, slugify } from '../logic/text.js';
+import { nameMentioned, remapSpeakerIds, renameInText, sanitizeSpeakerTags } from '../logic/rename.js';
+import { applyTracker, findLookups, isTempId } from '../logic/trackerApply.js';
 import { extractTracker } from '../logic/trackerParse.js';
 import { updateAutoInjection } from '../prompt/injection.js';
 import { adaptUser, currentUser, personaData, userBefore } from '../scene/persona.js';
 import { currentScene, instanceOpts, sceneBefore, snapOf } from '../scene/roster.js';
 import { renderLibraryList } from '../ui/library/libraryList.js';
 import { renderRoster } from '../ui/roster/rosterBar.js';
+import { pickMatch } from '../ui/matchPicker.js';
 import { showTrackerBlock } from '../ui/trackerBlock.js';
 
 let processing = false;
+
+/**
+ * For each character the LLM brought in who is not one of this chat's NPCs by id, look for close names
+ * (this chat's NPCs first, then library cards this chat has not used) and let the user pick one or "Create new".
+ * Returns choices aligned with `list`, for applyTracker.
+ */
+async function askMatches(list, scene, excludeNames, beforeAsk, earlierTexts) {
+    const s = settings();
+    const { lookups } = findLookups(list, scene, {
+        isSpecified: (name) => nameMentioned(name, earlierTexts),
+        library: lib(),
+        threshold: s.threshold / 100,
+        numericTolerance: s.numericTolerance,
+        excludeNames,
+        minScore: (Number(s.nameMatch) || 70) / 100,
+    });
+    const choices = [];
+    if (lookups.length) { try { beforeAsk?.(); } catch { /* cosmetic */ } }
+    const sc = toScene(scene);
+    for (let k = 0; k < lookups.length; k++) {
+        const lk = lookups[k];
+        const pool = lk.source === 'instance' ? sc.instances : lib();
+        try { choices[lk.index] = await pickMatch(lk, pool, { step: k + 1, steps: lookups.length }); } catch (e) {
+            console.error('[NPC Book] match popup failed', e);
+            choices[lk.index] = { create: true };
+        }
+    }
+    return { choices, lookups };
+}
+
+/**
+ * Make the reply match who its characters turned out to be: speaker blocks with a temporary or made-up id get the
+ * real id, and a character the user matched to someone else is renamed in the text (unless the story named them before).
+ */
+function rewriteReply(text, list, ids, choices, lookups, scene) {
+    const idMap = {};
+    const renames = [];
+    const sc = toScene(scene);
+    for (let i = 0; i < list.length; i++) {
+        const e = list[i];
+        const id = ids[i];
+        if (!e || typeof e !== 'object' || !id) continue;
+        const written = cleanId(e.id);
+        if (written && written !== id) idMap[written] = id;
+        // A speaker block may use a slug of the name instead of the id it was given.
+        const slug = e.name ? slugify(e.name) : '';
+        if (slug && slug !== id && (isTempId(written) || !sc.instances[slug])) idMap[slug] = id;
+        const lk = lookups.find(x => x.index === i);
+        const target = sc.instances[id];
+        if (choices[i]?.link && lk && !lk.specified && e.name && target?.name && normalize(e.name) !== normalize(target.name)) renames.push([e.name, target.name]);
+    }
+    // One new character this reply: a bare placeholder in a speaker tag can only mean them.
+    const fresh = list.map((e, i) => (e && typeof e === 'object' && (isTempId(cleanId(e.id)) || (!e.id && e.new)) ? ids[i] : null)).filter(Boolean);
+    if (fresh.length === 1) for (const k of ['to_be_allocated', 'generated']) if (!idMap[k]) idMap[k] = fresh[0];
+    let out = remapSpeakerIds(text, idMap);
+    for (const [from, to] of renames) out = renameInText(out, from, to);
+    return out;
+}
 
 /** True when no user message comes before chat[idx] (i.e. it is a greeting / intro message). */
 function isGreetingIdx(idx) {
@@ -90,12 +150,24 @@ export async function processLastMessage() {
     const g = runtime.genCtx;
     if (g.idx !== undefined && g.idx !== idx) { runtime.genCtx = null; return; } // stale: belongs to an earlier message
     const existing = snapOf(msg);
-    const exPeek = extractTracker(msg.mes);
-    if (!exPeek.found && existing && existing.sig === sig(msg.mes)) return; // already processed
+    // Speaker tags may only hold an id; data a model put in them is cut out (and kept as tracker entries below).
+    const san = sanitizeSpeakerTags(msg.mes);
+    const tagsFixed = san.text !== msg.mes;
+    const exPeek = extractTracker(san.text);
+    if (!exPeek.found && !tagsFixed && existing && existing.sig === sig(msg.mes)) return; // already processed
     processing = true;
     let processed = null;
     try {
-        const ex = exPeek;
+        if (tagsFixed) {
+            msg.mes = san.text;
+            if (Array.isArray(msg.swipes) && msg.swipe_id !== undefined) msg.swipes[msg.swipe_id] = san.text;
+            console.warn('[NPC Book] removed character data from <npc> speaker tags', san.entries);
+        }
+        let ex = exPeek;
+        // Characters described only in a speaker tag (not in the <npcs> block) are still tracked.
+        const has = (e) => (ex.json || []).some(x => x && typeof x === 'object' && ((e.id && cleanId(x.id) === cleanId(e.id)) || (e.name && normalize(x.name) === normalize(e.name))));
+        const extra = san.entries.filter(e => !has(e));
+        if (extra.length) ex = ex.found ? { ...ex, json: [...(ex.json || []), ...extra] } : { found: true, json: extra, raw: '', cleaned: msg.mes, removed: '', error: null, truncated: false };
         const pre = toScene(g.pre ?? sceneBefore(idx));
         const preUser = adaptUser(g.preUser ?? userBefore(idx));
         let post = (g.type === 'continue' && existing?.post) ? toScene(existing.post) : pre;
@@ -131,8 +203,15 @@ export async function processLastMessage() {
                         (x, d) => { u.ext = u.ext || {}; u.ext[x] = d; touched = true; });
                     if (touched) postUser = u;
                 }
+                // Characters the LLM brought in whose name is close to someone known: the user decides who they are.
+                const npcEntries = entries.filter(e => !isUserEntry(e));
+                // The reply is shown without its <npcs> block while the user decides.
+                const earlier = chat.slice(0, idx).map(m => m?.mes);
+                const { choices, lookups } = await askMatches(npcEntries, post, excludeNames, () => c.updateMessageBlock(idx, msg), earlier);
+                if ((ctx().chat || [])[idx] !== msg) return; // the chat changed while the popup was open
                 // The block lists changes, so apply it to the scene as it stood before this text was written.
-                const r = applyTracker(entries.filter(e => !isUserEntry(e)), post, {
+                const r = applyTracker(npcEntries, post, {
+                    choices,
                     library: lib(),
                     threshold: s.threshold / 100,
                     numericTolerance: s.numericTolerance,
@@ -182,6 +261,12 @@ export async function processLastMessage() {
                 }
 
                 post = r.scene;
+                // Real ids in the speaker blocks, and the chosen NPC's name where the LLM made up another one.
+                const rewritten = rewriteReply(msg.mes, npcEntries, r.ids || [], choices, lookups, post);
+                if (rewritten !== msg.mes) {
+                    msg.mes = rewritten;
+                    if (Array.isArray(msg.swipes) && msg.swipe_id !== undefined) msg.swipes[msg.swipe_id] = rewritten;
+                }
                 trackLog = r.log.map(l => `${l.action}: ${l.name ?? l.id ?? ''}${l.id && l.name && l.id !== l.name ? ` (${l.id})` : ''}${l.items ? ` [${l.items.join(', ')}]` : ''}`);
             } else {
                 console.warn('[NPC Book] could not parse tracker block:', ex.error, ex.raw);

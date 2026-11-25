@@ -1,6 +1,6 @@
 // Extension settings: load with defaults and migrations, save, and the NPC library stored in them.
 
-import { DEFAULTS, DEFAULT_INSTRUCTIONS, DEFAULT_INSTRUCTIONS_V1, DEFAULT_INSTRUCTIONS_V2, DEFAULT_OUTFIT_RULES, DEFAULT_OUTFIT_RULES_V2, DEFAULT_PORTRAIT_LLM_PROMPT, DEFAULT_PORTRAIT_LLM_PROMPT_V1, MODULE } from '../constants.js';
+import { DEFAULTS, DEFAULT_INSTRUCTIONS, DEFAULT_INSTRUCTIONS_V1, DEFAULT_INSTRUCTIONS_V2, DEFAULT_INSTRUCTIONS_V3, DEFAULT_INSTRUCTIONS_V4, DEFAULT_INSTRUCTIONS_V5, DEFAULT_SPEAKER_RULE, DEFAULT_SPEAKER_RULE_V1, DEFAULT_SPEAKER_REMINDER, DEFAULT_SPEAKER_REMINDER_V1, DEFAULT_OUTFIT_RULES, DEFAULT_OUTFIT_RULES_V2, DEFAULT_PORTRAIT_LLM_PROMPT, DEFAULT_PORTRAIT_LLM_PROMPT_V1, MODULE } from '../constants.js';
 import { ctx } from './context.js';
 
 export function settings() {
@@ -36,6 +36,14 @@ export function settings() {
     // Wardrobes moved to a sister extension: unedited copies of the wardrobe-era prompts follow the new defaults.
     if (typeof s.instructions === 'string' && s.instructions.trim() === DEFAULT_INSTRUCTIONS_V2.trim()) s.instructions = DEFAULT_INSTRUCTIONS;
     if (typeof s.outfitRules === 'string' && s.outfitRules.trim() === DEFAULT_OUTFIT_RULES_V2.trim()) s.outfitRules = DEFAULT_OUTFIT_RULES;
+    // Library NPCs are no longer sent to the LLM; Known NPCs lists only this chat's NPCs, by id and name.
+    if (typeof s.instructions === 'string' && s.instructions.trim() === DEFAULT_INSTRUCTIONS_V3.trim()) s.instructions = DEFAULT_INSTRUCTIONS;
+    if (typeof s.instructions === 'string' && s.instructions.trim() === DEFAULT_INSTRUCTIONS_V4.trim()) s.instructions = DEFAULT_INSTRUCTIONS;
+    if (typeof s.instructions === 'string' && s.instructions.trim() === DEFAULT_INSTRUCTIONS_V5.trim()) s.instructions = DEFAULT_INSTRUCTIONS;
+    if (typeof s.speakerRule === 'string' && s.speakerRule.trim() === DEFAULT_SPEAKER_RULE_V1.trim()) s.speakerRule = DEFAULT_SPEAKER_RULE;
+    if (typeof s.speakerReminder === 'string' && s.speakerReminder.trim() === DEFAULT_SPEAKER_REMINDER_V1.trim()) s.speakerReminder = DEFAULT_SPEAKER_REMINDER;
+    if (typeof s.instructions === 'string') s.instructions = s.instructions.replace('Known NPCs (id: name — identity):', 'Known NPCs, people this story has already met (id: name; their details appear in the scene when they are present):');
+    delete s.includeLibrary;
     return s;
 }
 export const save = () => ctx().saveSettingsDebounced();

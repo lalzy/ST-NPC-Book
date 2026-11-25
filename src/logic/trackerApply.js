@@ -2,10 +2,13 @@
 // Applies a parsed tracker block to the chat scene (arrivals, returns, changes, departures, new NPCs).
 
 import { attachInstance, cloneScene, unusedTemplates } from './instances.js';
-import { resolveEntry } from './matching.js';
+import { identityCandidates, resolveEntry } from './matching.js';
 import { applyOutfitChange, normOutfitChange, resolveOutfit } from './outfit.js';
 import { PROFILE_TRAIT_KEYS, profileFromEntry } from './profile.js';
 import { cleanId, normalize, pickEnum, uniqueId } from './text.js';
+
+/** The placeholder id the LLM gives a new character ("to_be_allocated", "to_be_allocated_2", …; older: "generated"): replaced with the real id. */
+export function isTempId(id) { return /^(?:to_be_allocated|generated)(?:[_-]?\d+)?$/.test(String(id ?? '').trim().toLowerCase()); }
 
 function titleFromId(id) { return String(id).replace(/[_-]+/g, ' ').replace(/\b[a-z]/g, c => c.toUpperCase()).trim(); }
 
@@ -28,9 +31,11 @@ function isLeaving(entry) {
  * onEntry(instance, entry, { isNew }, scene) runs last for every applied (non-leaving) entry, on the scene's own instance.
  * catalogFor(instance) → { items, strict } offers known clothing (e.g. a wardrobe) for outfit changes; without it,
  * any clothing can be worn. onCreate(instance, template) is passed on to new instances.
- * Returns { scene, created: [template], createdEntries, skipped, log }.
+ * choices[i], when given, is the user's answer for list[i] (see findLookups): { link: id } uses that instance or template,
+ * { create: true } makes a new NPC from the entry without matching.
+ * Returns { scene, created: [template], createdEntries, skipped, log, ids } where ids[i] is the id list[i] ended up as.
  */
-export function applyTracker(list, prevScene, { library, threshold, numericTolerance, postures, states, conditions = ['Worn'], autoCreate = true, traitKeys = [], excludeNames = [], maxNew = 0, prepareNew = null, onEntry = null, catalogFor = null, onCreate = null }) {
+export function applyTracker(list, prevScene, { library, threshold, numericTolerance, postures, states, conditions = ['Worn'], autoCreate = true, traitKeys = [], excludeNames = [], maxNew = 0, prepareNew = null, onEntry = null, catalogFor = null, onCreate = null, choices = [] }) {
     const scene = cloneScene(prevScene);
     const lib = { ...(library || {}) };
     const opts = { postures, states, conditions, onCreate };
@@ -38,30 +43,39 @@ export function applyTracker(list, prevScene, { library, threshold, numericToler
     const createdEntries = [];
     const skipped = [];
     const log = [];
+    const ids = [];
     const excluded = new Set(excludeNames.map(normalize).filter(Boolean));
 
-    for (const raw of Array.isArray(list) ? list : []) {
+    const items = Array.isArray(list) ? list : [];
+    for (let i = 0; i < items.length; i++) {
+        const raw = items[i];
         if (!raw || typeof raw !== 'object') continue;
         const entry = { ...raw, id: cleanId(raw.id) };
+        if (isTempId(entry.id)) entry.id = '';
         const nm = String(entry.name ?? '').trim();
         if (!nm && !entry.id) continue;
         if (nm && excluded.has(normalize(nm))) continue;
+        const choice = choices[i] || null;
 
-        // 1) the chat's own instances, 2) templates not instanced in this chat yet
-        let { id, reason, score } = resolveEntry(entry, { library: scene.instances, presentIds: scene.active, threshold, numericTolerance });
-        if (!id) {
+        // The user's pick wins. Otherwise: 1) the chat's own instances, 2) templates not instanced in this chat yet.
+        let id = null, reason = '', score = null;
+        if (choice?.link && (scene.instances[choice.link] || lib[choice.link])) { id = choice.link; reason = 'user-picked'; }
+        else if (choice?.create) reason = 'user-create-new';
+        else ({ id, reason, score } = resolveEntry(entry, { library: scene.instances, presentIds: scene.active, threshold, numericTolerance }));
+        if (!id && !choice) {
             const t = resolveEntry(entry, { library: unusedTemplates(scene, lib), presentIds: [], threshold, numericTolerance });
             if (t.id) ({ id, score } = t), reason = `template:${t.reason}`;
         }
         if (isLeaving(entry)) {
             const at = id ? scene.active.indexOf(id) : -1;
             if (at >= 0) { scene.active.splice(at, 1); log.push({ name: nm || scene.instances[id]?.name, action: 'left', id }); }
+            if (id) ids[i] = id;
             continue;
         }
         let isNew = false;
         if (!id) {
-            if (!autoCreate) { log.push({ name: nm, action: 'skipped', reason }); continue; }
-            if (maxNew > 0 && created.length >= maxNew) { skipped.push(nm || entry.id); log.push({ name: nm, action: 'skipped-limit' }); continue; }
+            if (!autoCreate && !choice?.create) { log.push({ name: nm, action: 'skipped', reason }); continue; }
+            if (maxNew > 0 && created.length >= maxNew && !choice?.create) { skipped.push(nm || entry.id); log.push({ name: nm, action: 'skipped-limit' }); continue; }
             const newId = uniqueId(entry.id || nm, x => !!lib[x] || !!scene.instances[x]);
             const traits = {};
             for (const k of traitKeys) traits[k] = '';
@@ -96,6 +110,7 @@ export function applyTracker(list, prevScene, { library, threshold, numericToler
         const wasActive = scene.active.includes(id);
         const inst = attachInstance(scene, id, lib, opts);
         if (!inst) continue;
+        ids[i] = id;
         if (!isNew) {
             if (!wasActive) log.push({ name: inst.name, action: hadInstance ? 'returned' : 'arrived', id, reason, score });
             else log.push({ name: inst.name, action: 'changed', id });
@@ -112,5 +127,48 @@ export function applyTracker(list, prevScene, { library, threshold, numericToler
         if (feelings !== undefined && feelings !== null && String(feelings).trim()) inst.feelings = String(feelings).trim();
         if (typeof onEntry === 'function') onEntry(inst, entry, { isNew }, scene);
     }
-    return { scene, created, createdEntries, skipped, log };
+    return { scene, created, createdEntries, skipped, log, ids };
+}
+
+/**
+ * Entries the user should decide on before the block is applied: someone the LLM brought in who is not already
+ * one of this chat's instances by id (or by exact name with matching identity). Their name, role and gender are matched
+ * (see identityCandidates) against this chat's instances first; only when none comes close, against library templates this chat has not used.
+ * An entry marked "new": true always goes through the name match. Characters leaving, excluded names and entries
+ * without a name are skipped. isSpecified(name) → true when the story named this person before (then only name matches count).
+ * Returns [{ index, entry, source: 'instance' | 'template', candidates: [{ id, score }] }]
+ * (only entries with at least one candidate), and `unmatched`: indexes that had a name but no candidate.
+ */
+export function findLookups(list, prevScene, { library, threshold, numericTolerance, excludeNames = [], minScore = 0.7, limit = 5, isSpecified = null }) {
+    const scene = cloneScene(prevScene);
+    const excluded = new Set(excludeNames.map(normalize).filter(Boolean));
+    const lookups = [];
+    const unmatched = [];
+    const items = Array.isArray(list) ? list : [];
+    for (let i = 0; i < items.length; i++) {
+        const raw = items[i];
+        if (!raw || typeof raw !== 'object' || isLeaving(raw)) continue;
+        const entry = { ...raw, id: cleanId(raw.id) };
+        if (isTempId(entry.id)) entry.id = '';
+        const nm = String(entry.name ?? '').trim();
+        if (!nm || excluded.has(normalize(nm))) continue;
+        const isNew = entry.new === true || String(entry.new).toLowerCase() === 'true';
+        if (!isNew) {
+            const hit = resolveEntry(entry, { library: scene.instances, presentIds: scene.active, threshold, numericTolerance });
+            if (hit.id) continue;
+        } else if (entry.id && scene.active.includes(entry.id)) continue; // already in the scene
+        // A name the story already used (e.g. the user wrote it) is that person: only name matches, no role-only stand-ins.
+        const specified = typeof isSpecified === 'function' && !!isSpecified(nm);
+        const keep = (list) => (specified ? list.filter(c => c.name >= minScore) : list);
+        let candidates = keep(identityCandidates(raw, scene.instances, { min: minScore, limit }));
+        let source = 'instance';
+        if (!candidates.length) {
+            const pool = unusedTemplates(scene, library);
+            candidates = keep(identityCandidates(raw, pool, { min: minScore, limit }));
+            source = 'template';
+        }
+        if (candidates.length) lookups.push({ index: i, entry: raw, source, candidates, specified });
+        else unmatched.push(i);
+    }
+    return { lookups, unmatched };
 }

@@ -2,11 +2,9 @@
 
 import { DEFAULT_USER_RULE, TRAIT_SAMPLES } from '../constants.js';
 import { ctx, excludedNames, hasChat } from '../core/context.js';
-import { traitSummary } from '../core/npcs.js';
 import { extsWith, pipe } from '../core/extHooks.js';
 import { extensions } from '../core/runtime.js';
 import { lib, settings } from '../core/settings.js';
-import { unusedTemplates } from '../logic/instances.js';
 import { resolveRef } from '../logic/matching.js';
 import { SLOTS } from '../logic/slots.js';
 import { normalize } from '../logic/text.js';
@@ -25,14 +23,12 @@ export function buildInstructionText() {
     if (!s.enabled || !hasChat()) return '';
     const c = ctx();
     const keys = s.traitKeys.length ? s.traitKeys : ['race', 'age', 'gender', 'role'];
-    // Known NPCs: everyone this chat has met (its instances), then library templates it has not used yet.
+    // Known NPCs: only the people this chat has met (its instances), by id and name. Library templates are never sent:
+    // the LLM brings in whoever it needs and the tracker matches the name (see findLookups). Details of an NPC are sent
+    // only through {{npcScene}}, while that NPC is in the scene.
     const scene = promptScene();
-    const line = (t) => { const tr = traitSummary(t); return `${t.id}: ${t.name}${tr ? ` — ${tr}` : ''}`; };
     const byName = (a, b) => String(a.name).localeCompare(String(b.name));
-    const libLines = [
-        ...Object.values(scene.instances).sort(byName).map(line),
-        ...(s.includeLibrary ? Object.values(unusedTemplates(scene, lib())).sort(byName).map(line) : []),
-    ];
+    const libLines = Object.values(scene.instances).sort(byName).map(t => `${t.id}: ${t.name}`);
     const text = String(s.instructions || '')
         .replaceAll('[[SPEAKER_RULE]]', s.enabled && s.speakerPortraits ? s.speakerRule : '')
         .replaceAll('[[OUTFIT_RULES]]', [s.trackOutfits ? s.outfitRules : '', s.trackUser ? DEFAULT_USER_RULE : '', ...extInstructions()].filter(Boolean).join('\n'))
