@@ -19,11 +19,19 @@ function isLeaving(entry) {
     return /^(left|leaves|leaving|gone|exit|exits|exited|departed)$/i.test(String(entry.left ?? entry.status ?? entry.action ?? '').trim());
 }
 
+/** True when a tracker entry says the character died ("dead": true, or a state / status / posture of dead, slain…). */
+export function isDead(entry) {
+    if (entry.dead === true || entry.died === true || entry.killed === true) return true;
+    const word = /^(dead|died|dies|killed|slain|deceased|lifeless|corpse)$/i;
+    return [entry.dead, entry.status, entry.state, entry.posture, entry.action, entry.left].some(v => v !== undefined && v !== null && typeof v !== 'object' && word.test(String(v).trim()));
+}
+
 /**
  * Apply a tracker block to the previous scene. The block lists CHANGES only:
  *   {"id": "x", "posture": "..."}          a character in the scene: only the fields that changed
  *   {"id": "x"} / {"name": "...", ...}      someone not in the scene yet arrives (known NPC, or a new one)
  *   {"id": "x", "left": true}               someone leaves
+ *   {"id": "x", "dead": true}               someone dies: leaves the scene for good, the instance is marked dead (kept)
  * Characters that are not mentioned stay exactly as they were.
  * Who someone is: the chat's own instances first (active ones preferred), then templates this chat has not used yet,
  * else a new template is created. A template is only read to create an instance; after that only the instance changes.
@@ -67,6 +75,21 @@ export function applyTracker(list, prevScene, { library, threshold, numericToler
             const t = resolveEntry(entry, { library: unusedTemplates(scene, lib), presentIds: [], threshold, numericTolerance });
             if (t.id) ({ id, score } = t), reason = `template:${t.reason}`;
         }
+        if (id && isDead(entry)) {
+            const at = scene.active.indexOf(id);
+            if (at >= 0) scene.active.splice(at, 1);
+            if (scene.instances[id]) scene.instances[id] = { ...scene.instances[id], dead: true };
+            log.push({ name: nm || scene.instances[id]?.name, action: 'died', id });
+            ids[i] = id;
+            continue;
+        }
+        // a dead character doesn't walk back in (unless the entry says it's alive again)
+        if (id && scene.instances[id]?.dead && entry.dead !== false && entry.alive !== true) {
+            log.push({ name: nm || scene.instances[id]?.name, action: 'skipped-dead', id });
+            ids[i] = id;
+            continue;
+        }
+        if (id && scene.instances[id]?.dead) scene.instances[id] = { ...scene.instances[id], dead: false };
         if (isLeaving(entry)) {
             const at = id ? scene.active.indexOf(id) : -1;
             if (at >= 0) { scene.active.splice(at, 1); log.push({ name: nm || scene.instances[id]?.name, action: 'left', id }); }

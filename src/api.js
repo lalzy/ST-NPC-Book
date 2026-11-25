@@ -16,7 +16,7 @@ import { cleanId, normalize, pickEnum, slugify, uniqueId } from './logic/text.js
 import { closestEnum } from './logic/enumMatch.js';
 import { updateAutoInjection } from './prompt/injection.js';
 import { currentUser, personaData, personaKey } from './scene/persona.js';
-import { addToScene, currentScene, currentRoster, findInstance, promptScene, removeFromScene, rosterAtMessage, writeCurrentScene } from './scene/roster.js';
+import { addToScene, currentScene, currentRoster, findInstance, markDead, promptScene, removeFromScene, rosterAtMessage, writeCurrentScene } from './scene/roster.js';
 import { avatarHtml } from './ui/avatar.js';
 import { injectStyle } from './ui/injectStyle.js';
 import { selectTemplate } from './ui/library/editor.js';
@@ -36,8 +36,9 @@ import { bindTabs } from './ui/tabs.js';
  *  getChatScene, getPromptScene, getSettings, openSheet. 8 added chatTab. 9 added modalButton, templateLibrary,
  *  isIdTaken, uniqueTemplateId, getAnyTemplate, getAllTemplates, getCardTabs, libraryOf, addToScene, removeFromScene, closeLibrary, refreshModalButtons.
  *  10 added sceneSide (scene bar split: friendly left, enemies right) and isEnemy.
+ *  11 added markDead, and "dead": true in tracker entries (a dead character leaves the scene for good; its instance is kept, marked dead).
  *  Full contract: EXTENDING.md. */
-export const API_VERSION = 10;
+export const API_VERSION = 11;
 
 /** Open an extension's sheet for one character in a popup. scope: 'instance' (this chat), 'template' (card), 'persona'. */
 function openSheet(ref, extId, { scope = 'instance' } = {}) {
@@ -155,6 +156,8 @@ export function exposePublicApi() {
         addToScene: (id) => addToScene(id),
         /** Take an NPC out of the scene (its instance stays in the chat). */
         removeFromScene: (id) => removeFromScene(id),
+        /** A character died: take it out of this chat's scene and mark its instance dead (card and instance kept). API 11. */
+        markDead: (id) => (hasChat() ? markDead(id) : false),
         /** Whether a scene character (id, name or instance) is shown on the enemy side of the scene bar. */
         isEnemy: (ref) => { const inst = ref && typeof ref === 'object' ? ref : (hasChat() ? findInstance(ref) : null); return !!inst && isEnemy(inst); },
         /** Close the NPC Book window. */

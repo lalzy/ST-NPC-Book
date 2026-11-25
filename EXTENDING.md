@@ -166,6 +166,7 @@ The Wardrobe extension is the full example: its catalog is the character's wardr
 | `isIdTaken(id)` / `uniqueTemplateId(base)` | Whether an id is used in any library / a free id made from a name (API 9). |
 | `libraryOf(id)` | `'npcbook'`, the extension id whose `templateLibrary` holds the card, or `null` (API 9). |
 | `addToScene(id)` / `removeFromScene(id)` | Put a card (any library) into this chat's scene / take it out (API 9). |
+| `markDead(id)` | A character died: take it out of this chat's scene for good and mark its instance `dead: true`. The card and the instance are kept (API 11). The tracker does the same for an entry with `"dead": true` (or a state of dead / slain / killed), and ignores later entries for a dead character unless they say `"dead": false`. |
 | `getCardTabs()` | Every registered `cardTab` as `{ id, label, icon, render, onSave, defaultData }`, so an extension library can show the same tabs as an NPC card (API 9). |
 | `closeLibrary()` / `refreshModalButtons()` | Close the NPC Book window / redraw the header buttons (API 9). |
 | `util` | `esc` (HTML), `xa` (XML attribute), `xt` (XML text), `normalize`, `slugify`, `indent`, `clone`, `uniqueId`, `pickEnum`, `cleanId`, `initials`, `parseJson` (lenient JSON, e.g. for LLM answers). |
@@ -236,3 +237,4 @@ Listen on `document`:
 | 8 | `chatTab`: a `cardTab` can also be a tab in a chat NPC's popover. Wardrobe and Relationships use it. |
 | 9 | `modalButton` (NPC Book window header) and `templateLibrary` (extension card stores, e.g. a Bestiary; ids unique across all libraries; new characters can be claimed by a library). API: `getAnyTemplate`, `getAllTemplates`, `isIdTaken`, `uniqueTemplateId`, `libraryOf`, `addToScene`, `removeFromScene`, `getCardTabs`, `closeLibrary`, `refreshModalButtons`. `resolveNpc` also looks in extension libraries. |
 | 10 | `sceneSide` and `isEnemy(ref)`: the scene bar shows friendly characters left and enemies right, with a divider. |
+| 11 | `markDead(id)`; tracker entries with `"dead": true` remove the character from the scene for good (instance kept, marked dead). |

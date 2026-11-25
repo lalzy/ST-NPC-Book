@@ -117,6 +117,16 @@ export function addToScene(id) {
 }
 
 /** Take an NPC out of the scene. Its instance stays in the chat. */
+/** A character died: out of the scene, and its instance marked dead (the card and the instance are kept). */
+export function markDead(id) {
+    const scene = cloneScene(currentScene());
+    const key = resolveRef(id, scene.instances) || id;
+    scene.active = scene.active.filter(x => x !== key);
+    if (scene.instances[key]) scene.instances[key] = { ...scene.instances[key], dead: true };
+    writeCurrentScene(scene);
+    return !!scene.instances[key];
+}
+
 export function removeFromScene(id) {
     const scene = cloneScene(currentScene());
     scene.active = scene.active.filter(x => x !== id);
