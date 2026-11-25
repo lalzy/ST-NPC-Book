@@ -44,7 +44,7 @@ if (window.NPCBook) register(window.NPCBook);
 else document.addEventListener('npcbook:ready', e => register(e.detail), { once: true });
 ```
 
-Check `api.apiVersion` (currently **9**) if you rely on something newer than the version that introduced it (listed in section 9).
+Check `api.apiVersion` (currently **10**) if you rely on something newer than the version that introduced it (listed in section 9).
 
 ---
 
@@ -89,6 +89,7 @@ Every hook is called inside a try/catch. A hook that throws is logged to the con
 | `chatTab: true` or `{ label?, icon?, wide?, render? }` | Needs `cardTab`. Shows your sheet as a **tab** in a chat NPC's scene-bar popover (next to State and Outfit) instead of a separate sheet button. | `render` defaults to `cardTab.render`, with the same `ctx` (`scope: 'instance'`). `data` is a draft saved by the popover's Save, then `cardTab.onSave({ id, scope: 'instance', data })` runs. `wide: true` widens the popover while your tab is open. `label` defaults to `cardTab.label`. If your `outfitCatalog` has an `editLabel`, its button on the Outfit tab switches to your tab. |
 | `personaSheet: { label, icon?, render(host, ctx), onSave?(info) }` | As a tab in the persona window (Persona Management → NPC Book), and as a button in your own scene-bar popover. | `ctx`: `{ data, kind: 'user', name, id: 'user', scope: 'persona', subject }` (`subject` is the stored persona data). Saved to the `persona` scope. |
 | `sheetLabel` | string | Label of the sheet button in an NPC's scene-bar popover (only when there is no `chatTab`). Default: `"<cardTab.label> sheet"`. |
+| `sceneSide(instance)` | Each time the scene bar is drawn, for every character in the scene (API 10). | Return `'enemy'` to show them on the right of the scene bar (after a divider), `'friendly'` for the left, or `undefined` to leave it to others. Without an answer, an instance whose card has `enemy: true` (or `kind: 'enemy'`) is an enemy. The bar only splits while an enemy is present. |
 | `sceneButton: { icon, title, active?, onClick(anchorEl) }` | An icon in the scene bar head. | `icon` and `title` are strings or functions returning them (`icon` is a Font Awesome class, such as `'fa-dice-d20'`). `active() === false` dims it. Call `NPCBook.refreshScene()` after changing what it shows. |
 
 Icons default to `fa-table-list` (sheets) and `fa-puzzle-piece` (scene buttons).
@@ -143,7 +144,7 @@ The Wardrobe extension is the full example: its catalog is the character's wardr
 
 | Member | Description |
 |---|---|
-| `apiVersion` / `version` | `9`. |
+| `apiVersion` / `version` | `10`. |
 | `registerExtension(def)` / `unregisterExtension(id)` | See section 3. |
 | `getScene()` | `{ roster: [{ id, name, instance, template }], userName }`: who is in the scene now (`template` equals `instance`; it is kept for older extensions). |
 | `getRosterAt(messageIndex)` | Who was in the scene at a chat message. |
@@ -234,3 +235,4 @@ Listen on `document`:
 | 7 | Wardrobe and Relationships moved out of NPC Book into sister extensions. Added `outfitCatalog`, `onInstanceCreate`, `cardTab`/`personaSheet` `onSave`, render `ctx.id`/`scope`/`subject`, `sceneXmlAlways`, `sceneXml` `scene`/`sceneIds`, `onTrackerEntry` `scene`/`user`, `getChatScene`, `getPromptScene`, `getSettings`, `openSheet`, `util` additions, `clothing`, `ui`. Outfits are self-contained items (any clothing). |
 | 8 | `chatTab`: a `cardTab` can also be a tab in a chat NPC's popover. Wardrobe and Relationships use it. |
 | 9 | `modalButton` (NPC Book window header) and `templateLibrary` (extension card stores, e.g. a Bestiary; ids unique across all libraries; new characters can be claimed by a library). API: `getAnyTemplate`, `getAllTemplates`, `isIdTaken`, `uniqueTemplateId`, `libraryOf`, `addToScene`, `removeFromScene`, `getCardTabs`, `closeLibrary`, `refreshModalButtons`. `resolveNpc` also looks in extension libraries. |
+| 10 | `sceneSide` and `isEnemy(ref)`: the scene bar shows friendly characters left and enemies right, with a divider. |

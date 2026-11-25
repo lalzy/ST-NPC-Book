@@ -244,3 +244,14 @@ body > .npcb-popover.npcb-menu { position: fixed !important; z-index: 10050 !imp
 .npcb-ext-modal-btns { display: flex; align-items: center; gap: 6px; }
 .npcb-ext-modal-btns:empty { display: none; }
 .npcb-ext-modal-btns .menu_button { margin: 0; }
+
+/* Scene bar split: friendly characters left, enemies right (when an enemy is in the scene) */
+.npcb-roster-cards.npcb-roster-split { gap: 6px; }
+.npcb-roster-side { display: flex; gap: 8px; min-width: 0; }
+.npcb-side-friendly { flex: 1 1 auto; }
+.npcb-side-enemy { flex: 0 1 auto; padding: 2px 6px; border-radius: 8px; background: rgba(220, 70, 70, .10); box-shadow: inset 0 0 0 1px rgba(220, 70, 70, .35); }
+.npcb-side-enemy .npcb-card-sub { color: #e88; }
+.npcb-roster-divider { display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 2px; font-size: .7em; opacity: .7; padding: 2px 0; }
+.npcb-roster-divider .fa-user-shield { color: #7c7; }
+.npcb-roster-divider .fa-skull { color: #e66; }
+.npcb-roster-divline { flex: 1; width: 2px; min-height: 18px; border-radius: 1px; background: var(--SmartThemeBorderColor); }

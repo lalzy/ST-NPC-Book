@@ -68,7 +68,7 @@ export function renderRoster() {
         .attr('title', `New NPCs go to: ${where}${chatFolder !== undefined ? ' (this chat)' : ' (default from Settings)'}. Click to change.`);
     const roster = currentRoster();
     bar.find('.npcb-roster-count').text(roster.length ? `(${roster.length})` : '');
-    const cards = roster.map(inst => {
+    const cardHtml = (inst) => {
         const t = inst; // the chat's instance carries its own card fields
         if (!t.portrait) ensurePortrait(t.id, { target: 'instance' });
         const name = t?.name ?? inst.name ?? inst.id;
@@ -78,8 +78,19 @@ export function renderRoster() {
             <div class="npcb-card-name" ${HEX_RE.test(t?.color || '') ? `style="color:${t.color}"` : ''}>${esc(name)}</div>
             <div class="npcb-card-sub">${esc(sub)}</div>
         </div>`;
-    });
-    bar.find('.npcb-roster-cards').html(cards.length ? cards.join('') : '<div class="npcb-empty">Nobody here. Add an NPC, or the LLM will add them as they appear.</div>');
+    };
+    // Friendly characters on the left, enemies on the right (only split when someone in the scene is an enemy).
+    const enemies = roster.filter(isEnemy);
+    const friends = roster.filter(i => !enemies.includes(i));
+    let html;
+    if (!roster.length) html = '<div class="npcb-empty">Nobody here. Add an NPC, or the LLM will add them as they appear.</div>';
+    else if (!enemies.length) html = friends.map(cardHtml).join('');
+    else {
+        html = `<div class="npcb-roster-side npcb-side-friendly" title="Friendly / neutral">${friends.length ? friends.map(cardHtml).join('') : '<div class="npcb-empty">No friendlies.</div>'}</div>
+            <div class="npcb-roster-divider" title="Friendly | Enemies"><span><i class="fa-solid fa-user-shield"></i></span><span class="npcb-roster-divline"></span><span><i class="fa-solid fa-skull"></i></span></div>
+            <div class="npcb-roster-side npcb-side-enemy" title="Enemies">${enemies.map(cardHtml).join('')}</div>`;
+    }
+    bar.find('.npcb-roster-cards').toggleClass('npcb-roster-split', enemies.length > 0).html(html);
     const us = bar.find('.npcb-user-slot');
     if (s.trackUser) {
         const c = ctx();
@@ -93,6 +104,22 @@ export function renderRoster() {
         us.show().html(`<div class="npcb-card npcb-user-card${inScene ? '' : ' npcb-user-out'}" style="position:relative;" title="${esc(c.name1)} (you · persona · ${inScene ? 'in-scene' : 'not-in-scene'})"><div class="npcb-user-ava"${fade}>${ava}</div><div class="npcb-card-name"${inScene ? '' : ' style="opacity:.6"'}>${esc(c.name1)}</div><div class="npcb-card-sub">${sub}</div>${btn}</div>`);
     } else us.hide().empty();
     updateAutoInjection();
+}
+
+/**
+ * Is a scene character an enemy? A sister extension says so with sceneSide(instance) → 'enemy' | 'friendly'
+ * (e.g. a Bestiary); without an answer, an instance copied from a card marked "enemy": true counts as one.
+ */
+export function isEnemy(inst) {
+    for (const ext of extensions.values()) {
+        if (typeof ext?.sceneSide !== 'function') continue;
+        try {
+            const side = ext.sceneSide(inst);
+            if (side === 'enemy') return true;
+            if (side === 'friendly') return false;
+        } catch (e) { console.warn(`[NPC Book] ${ext.id} sceneSide failed`, e); }
+    }
+    return inst?.enemy === true || inst?.kind === 'enemy';
 }
 
 /** Scene bar buttons added by sister extensions (registerExtension({ sceneButton })). */

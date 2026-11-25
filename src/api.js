@@ -27,7 +27,7 @@ import { openPersonaCharacter } from './ui/persona/personaCharacter.js';
 import { closePopovers, placePopover } from './ui/popover.js';
 import { openInstanceEditor } from './ui/roster/instanceEditor.js';
 import { openInstanceExtSheet } from './ui/roster/instanceExtSheet.js';
-import { renderRoster } from './ui/roster/rosterBar.js';
+import { isEnemy, renderRoster } from './ui/roster/rosterBar.js';
 import { bindTabs } from './ui/tabs.js';
 
 /** API version. 6 added: onTrackerEntry, transformEntry, entryKeys, placeholders, transformInstructions, transformScene,
@@ -35,8 +35,9 @@ import { bindTabs } from './ui/tabs.js';
  *  cardTab/personaSheet onSave, render ctx id/scope, sceneXml scene/sceneIds, onTrackerEntry scene, clothing, ui,
  *  getChatScene, getPromptScene, getSettings, openSheet. 8 added chatTab. 9 added modalButton, templateLibrary,
  *  isIdTaken, uniqueTemplateId, getAnyTemplate, getAllTemplates, getCardTabs, libraryOf, addToScene, removeFromScene, closeLibrary, refreshModalButtons.
+ *  10 added sceneSide (scene bar split: friendly left, enemies right) and isEnemy.
  *  Full contract: EXTENDING.md. */
-export const API_VERSION = 9;
+export const API_VERSION = 10;
 
 /** Open an extension's sheet for one character in a popup. scope: 'instance' (this chat), 'template' (card), 'persona'. */
 function openSheet(ref, extId, { scope = 'instance' } = {}) {
@@ -154,6 +155,8 @@ export function exposePublicApi() {
         addToScene: (id) => addToScene(id),
         /** Take an NPC out of the scene (its instance stays in the chat). */
         removeFromScene: (id) => removeFromScene(id),
+        /** Whether a scene character (id, name or instance) is shown on the enemy side of the scene bar. */
+        isEnemy: (ref) => { const inst = ref && typeof ref === 'object' ? ref : (hasChat() ? findInstance(ref) : null); return !!inst && isEnemy(inst); },
         /** Close the NPC Book window. */
         closeLibrary: () => closeLibrary(),
         /**
