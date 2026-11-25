@@ -44,7 +44,7 @@ if (window.NPCBook) register(window.NPCBook);
 else document.addEventListener('npcbook:ready', e => register(e.detail), { once: true });
 ```
 
-Check `api.apiVersion` (currently **10**) if you rely on something newer than the version that introduced it (listed in section 9).
+Check `api.apiVersion` (currently **11**) if you rely on something newer than the version that introduced it (listed in section 9).
 
 ---
 
@@ -144,7 +144,7 @@ The Wardrobe extension is the full example: its catalog is the character's wardr
 
 | Member | Description |
 |---|---|
-| `apiVersion` / `version` | `10`. |
+| `apiVersion` / `version` | `11`. |
 | `registerExtension(def)` / `unregisterExtension(id)` | See section 3. |
 | `getScene()` | `{ roster: [{ id, name, instance, template }], userName }`: who is in the scene now (`template` equals `instance`; it is kept for older extensions). |
 | `getRosterAt(messageIndex)` | Who was in the scene at a chat message. |

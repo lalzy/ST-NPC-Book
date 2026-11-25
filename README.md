@@ -107,7 +107,7 @@ This will create 2 dialogue cards, one for seraphina, followed by narration (not
 Swiping or deleting messages will roll state/NPCs etc back to that point. States are stored in the message metadata.
 
 ## Sister extensions
-NPC Book can be extended by other extensions without forking it: stat sheets for any game system (Ironsworn, D&D, GURPS®…), extra tracked fields (occupation, faction, reputation…), or changes to what the AI is told and what NPC Book reads from its replies. Extensions can add their own tabs to NPC cards and your persona, their own information to what the AI sees, and read what the AI writes about each character.
+NPC Book can be extended by other extensions without forking it: stat sheets for any game system (Ironsworn, D&D, GURPS…), extra tracked fields (occupation, faction, reputation…), or changes to what the AI is told and what NPC Book reads from its replies. Extensions can add their own tabs to NPC cards and your persona, their own information to what the AI sees, and read what the AI writes about each character.
 
 See **[EXTENDING.md](EXTENDING.md)** for the full guide and API, and [`examples/`](examples/) for two small, commented sister extensions (an occupation tracker and a simple stat sheet) to copy from.
 
@@ -115,7 +115,7 @@ See **[EXTENDING.md](EXTENDING.md)** for the full guide and API, and [`examples/
 ## Existing sister extensions:
 - [Wardrobe](https://github.com/lalzy/ST-NPC-Book-wardrobe): each NPC and your persona owns a wardrobe; outfits are limited to it, it is sent to the AI, new NPCs get one, and ✨ Generate fills it.
 - [Relationships](https://github.com/lalzy/ST-NPC-Book-relationships): who knows whom and how they feel, with a web/tree view; tracked per chat by the AI.
-- [NPC Book Character Sheet](https://github.com/lalzy/ST-NPC-Book-Gurps): a character sheet for use with the GURPS® system. It ships no rules data; you fill in your own.
+- [Character Stat-sheet](https://github.com/lalzy/ST-NPCBook-Character-Sheets): designed primarily for Gurps (but with rules etc stripped out, so should be mostly generic-capable).
 
 
 
@@ -230,7 +230,3 @@ Any combination of upper/top/torso/chest, lower/bottom/legs or feet/foot/shoes w
 | `outfit` / `wear` | as for NPCs | Your clothing change. |
 
 The AI is only asked for your entry while **Track me** is on and you are in the scene. Mood and feelings are never tracked for you. Sister extensions can read extra keys from both blocks (for example `occupation`).
-
-## Trademarks
-
-GURPS is a registered trademark of Steve Jackson Games. NPC Book is not affiliated with or endorsed by Steve Jackson Games. Other game names mentioned are trademarks of their owners.
