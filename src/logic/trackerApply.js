@@ -6,6 +6,7 @@ import { identityCandidates, resolveEntry } from './matching.js';
 import { applyOutfitChange, normOutfitChange, resolveOutfit } from './outfit.js';
 import { PROFILE_TRAIT_KEYS, profileFromEntry } from './profile.js';
 import { cleanId, normalize, pickEnum, uniqueId } from './text.js';
+import { closestEnum } from './enumMatch.js';
 
 /** The placeholder id the LLM gives a new character ("to_be_allocated", "to_be_allocated_2", …; older: "generated"): replaced with the real id. */
 export function isTempId(id) { return /^(?:to_be_allocated|generated)(?:[_-]?\d+)?$/.test(String(id ?? '').trim().toLowerCase()); }
@@ -121,8 +122,8 @@ export function applyTracker(list, prevScene, { library, threshold, numericToler
             if (oc.created.length) log.push({ name: inst.name, action: 'clothing-new', id, items: oc.created.map(x => x.name) });
             if (oc.rejected.length) log.push({ name: inst.name, action: 'outfit-rejected', items: oc.rejected });
         }
-        inst.posture = pickEnum(entry.posture, postures, inst.posture);
-        inst.state = pickEnum(entry.state, states, inst.state);
+        inst.posture = closestEnum(entry.posture, postures, inst.posture);
+        inst.state = closestEnum(entry.state, states, inst.state);
         const feelings = entry.feelings ?? entry.thoughts;
         if (feelings !== undefined && feelings !== null && String(feelings).trim()) inst.feelings = String(feelings).trim();
         if (typeof onEntry === 'function') onEntry(inst, entry, { isNew }, scene);

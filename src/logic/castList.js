@@ -4,7 +4,8 @@
 import { matchBracket, stripTrailingCommas } from './json.js';
 import { applyClothing } from './outfit.js';
 import { normalizeSlot } from './slots.js';
-import { normalize, pickEnum } from './text.js';
+import { normalize } from './text.js';
+import { closestEnum } from './enumMatch.js';
 
 /** Turn the parsed "characters" array into [{ ref, overrides }]. Every entry must be an object with an "id". */
 export function castEntries(list) {
@@ -87,7 +88,7 @@ export function applyCastOverrides(inst, overrides, { catalog = [], strict = fal
     const out = { ...inst, outfit: (inst?.outfit || []).map(x => ({ ...x })) };
     const added = [];
     const warnings = [];
-    const asEnum = (v, list) => { const t = String(v ?? '').trim(); return t ? pickEnum(t, list, t) : ''; };
+    const asEnum = (v, list) => { const t = String(v ?? '').trim(); return t ? closestEnum(t, list, t) : ''; };
     const dress = (v) => {
         const r = applyClothingOverride(out.outfit, v, { conditions, catalog, strict });
         out.outfit = r.outfit; added.push(...r.added); warnings.push(...r.warnings);

@@ -12,6 +12,7 @@ import { attachInstance, cloneScene, toScene } from '../logic/instances.js';
 import { resolveRef } from '../logic/matching.js';
 import { applyOutfitChange, normOutfitChange, resolveOutfit } from '../logic/outfit.js';
 import { cleanId, normalize, pickEnum, slugify } from '../logic/text.js';
+import { closestEnum } from '../logic/enumMatch.js';
 import { nameMentioned, remapSpeakerIds, renameInText, sanitizeSpeakerTags } from '../logic/rename.js';
 import { applyTracker, findLookups, isTempId } from '../logic/trackerApply.js';
 import { extractTracker } from '../logic/trackerParse.js';
@@ -185,7 +186,7 @@ export async function processLastMessage() {
                 if (userEntry && s.trackUser) {
                     const p = personaData();
                     const u = clone(postUser);
-                    u.posture = pickEnum(userEntry.posture, s.postures, u.posture);
+                    u.posture = closestEnum(userEntry.posture, s.postures, u.posture);
                     if (s.trackOutfits) {
                         const cat = outfitCatalog({ source: 'tracker', kind: 'user', id: 'user', subject: p, ext: { ...(p.ext || {}), ...(u.ext || {}) } });
                         const oc = applyOutfitChange(resolveOutfit(u.outfit, p.wardrobe || []), normOutfitChange(userEntry), { conditions: s.conditions, catalog: cat.items, strict: cat.strict });

@@ -12,6 +12,7 @@ import { resolveRef } from './logic/matching.js';
 import { applyClothing, exposureSummary, findItem, findItemLoose, makeItem, outfitBySlot, resolveOutfit, wearItem } from './logic/outfit.js';
 import { SLOTS, STACKING_SLOTS, inferSlots, normalizeSlot, normalizeSlots } from './logic/slots.js';
 import { cleanId, normalize, pickEnum, slugify, uniqueId } from './logic/text.js';
+import { closestEnum } from './logic/enumMatch.js';
 import { updateAutoInjection } from './prompt/injection.js';
 import { currentUser, personaData, personaKey } from './scene/persona.js';
 import { currentScene, currentRoster, findInstance, promptScene, rosterAtMessage, writeCurrentScene } from './scene/roster.js';
@@ -166,7 +167,7 @@ export function exposePublicApi() {
         openSheet,
         openPersonaCharacter,
         saveSettings: save,
-        util: { esc, xa, xt, normalize, slugify, indent, clone, uniqueId, pickEnum, cleanId, initials, parseJson: parseLenientJson },
+        util: { esc, xa, xt, normalize, slugify, indent, clone, uniqueId, pickEnum, closestEnum, cleanId, initials, parseJson: parseLenientJson },
         /** Clothing model shared by the paperdoll, the tracker and sister extensions (items: {id, name, slots, condition?, note?}). */
         clothing: { SLOTS, SLOT_LABEL, STACKING_SLOTS, inferSlots, normalizeSlot, normalizeSlots, findItem, findItemLoose, makeItem, wearItem, outfitBySlot, resolveOutfit, applyClothing, exposureSummary },
         /** NPC Book's UI building blocks, so sister extensions look the same without copying them. */
