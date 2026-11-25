@@ -254,3 +254,8 @@
 /* last tracker block viewer */
 .npcb-roster-head .npcb-roster-block { opacity: .6; }
 .npcb-blockview { text-align: left; display: flex; flex-direction: column; gap: 6px; }
+
+/* sister-extension buttons in the scene bar head */
+.npcb-roster-ext { display: inline-flex; align-items: center; gap: 8px; }
+.npcb-roster-ext:empty { display: none !important; }
+.npcb-roster-ext .npcb-ext-off { opacity: .35; }

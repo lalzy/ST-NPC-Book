@@ -12,24 +12,31 @@ import { currentRoster, findInstance, rosterAtMessage } from './scene/roster.js'
 import { selectTemplate } from './ui/library/editor.js';
 import { libState } from './ui/library/state.js';
 import { openPersonaCharacter } from './ui/persona/personaCharacter.js';
+import { renderRoster } from './ui/roster/rosterBar.js';
 
 export function exposePublicApi() {
     window.NPCBook = {
-        version: 4,
+        version: 5,
         /**
          * Register a sister extension.
          * def = { id, label?, defaultData?(), cardTab?: { label, render(host, {data, template, isNew, kind}) },
          *         personaSheet?: { label, icon?, render(host, {data, kind, name}) },
          *         sceneXml?({kind, name, id, template, instance, data}) -> string,
-         *         instructions?({autoCreate}) -> string, fromTracker?(entry, template) -> data }
+         *         instructions?({autoCreate}) -> string, fromTracker?(entry, template) -> data,
+         *         sceneButton?: { icon() -> 'fa-…', title() -> string, active?() -> bool, onClick(anchorEl) } }
+         * sceneButton adds an icon to the scene bar head (next to Add NPC / Folder); active() === false dims it.
+         * Call refreshScene() after changing what it shows.
          * Card/persona `data` objects are mutable drafts; NPC Book saves them when the user presses Save.
          */
         registerExtension(def) {
             if (!def?.id) throw new Error('registerExtension: id required');
             extensions.set(def.id, def);
             if ($('#npcb_library').is(':visible') && (libState.selected || libState.isNew)) selectTemplate(libState.selected, libState.isNew);
+            renderRoster();
             updateAutoInjection();
         },
+        /** Redraw the scene bar (and its sister-extension buttons) and refresh injected prompts. */
+        refreshScene: () => renderRoster(),
         getLibrary: () => lib(),
         getTemplate: (id) => lib()[id] || null,
         getPersonaData: (extId) => personaData().ext?.[extId] ?? null,
