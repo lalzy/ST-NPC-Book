@@ -13,6 +13,8 @@ NPC Book's own **Wardrobe** and **Relationships** features are sister extensions
 | Example | Shows |
 |---|---|
 | [`examples/01-identity-field`](examples/01-identity-field/index.js) | Adds one field ("Occupation") to every card's Identity section with `fields` (API 12). |
+| [`examples/07-biography-section`](examples/07-biography-section/index.js) | A new card section, Biography, with Goals, Likes and Fears (`sections`, API 13). |
+| [`examples/08-field-dependency`](examples/08-field-dependency/index.js) | Primary hormone worked out from gender (`dependsOn` + `derive`, API 13). |
 | [`examples/02-tab-and-button`](examples/02-tab-and-button/index.js) | A new card tab (`cardTab`) and a new scene-bar button (`sceneButton`). |
 | [`examples/03-restyle`](examples/03-restyle/index.js) | Changes how the scene bar looks with `ui.injectStyle`. |
 | [`examples/06-key-phrase`](examples/06-key-phrase/index.js) | A key phrase in your or the AI's message runs a function (`npcbook:message`, `removeFromScene`). |
@@ -48,7 +50,7 @@ if (window.NPCBook) register(window.NPCBook);
 else document.addEventListener('npcbook:ready', e => register(e.detail), { once: true });
 ```
 
-Check `api.apiVersion` (currently **12**) if you rely on something newer than the version that introduced it (listed in section 9).
+Check `api.apiVersion` (currently **13**) if you rely on something newer than the version that introduced it (listed in section 9).
 
 ---
 
@@ -116,13 +118,29 @@ api.registerExtension({
 | Member | Notes |
 |---|---|
 | `name` | Required. The label in the card editor (`"Goals"`). |
-| `place` | `'root'`, `'identity'` (default) or `'profile'`. **root**: the card's top block (ID, Name, Folder, Dialogue color); in the prompt, an attribute of `<char …>`. **identity**: the Identity section; in the prompt, an attribute of `<identity …/>` among the Identity keys. **profile**: the Profile section; in the prompt, an attribute of `<identity …/>` among the profile attributes. |
+| `place` | `'root'`, `'identity'` (default), `'profile'`, or the id of a section from `sections` (API 13, below). **root**: the card's top block (ID, Name, Folder, Dialogue color); in the prompt, an attribute of `<char …>`. **identity**: the Identity section; in the prompt, an attribute of `<identity …/>` among the Identity keys. **profile**: the Profile section; in the prompt, an attribute of `<identity …/>` among the profile attributes. |
 | `before` / `after` | An existing field of that place to sit next to, in the editor and in the prompt. root: `id`, `name`, `folder`, `color` (the prompt has only `name` and `id`). identity: your Identity keys (Settings → Identity keys). profile: `height`, `pronouns`, `sexuality`, `sexual_experience`. Another extension's field can be named by its `prompt`. Not given or not found: the end of the section. |
 | `type` | `'string'` (default), `'number'` or `'boolean'` (a checkbox; sent only when true). |
 | `prompt` | The prompt-return name: the attribute the AI sees (`life-goal="to become a super star"`) and the key it writes back in a tracker or greeting entry (top level or inside `"traits"`; `life_goal` and `Life Goal` match too). Default: `name` in lower case, spaces as `_`. |
 | `key` | Storage key. Default: `prompt`. |
 | `placeholder` | Grey hint text in the empty box. |
+| `dependsOn` | (API 13) The field this one is worked out from: an Identity key (`'gender'`), a profile field (`'pronouns'`), `'name'` / `'id'`, or another extension field's `prompt`. Makes the field **derived**. |
+| `derive` | (API 13) How a derived field is worked out. A map `{ 'male\|man\|boy': 'testosterone', 'female\|woman\|girl': 'estrogen', '*': 'N/A' }`: each key is matched against the words of the source value (`\|` separates alternatives), `'*'` is everything else (an empty source too). Or a function `(sourceValue, card) => value`. A derived field shows as a read-only box that follows its source while you edit, is worked out each time it is shown or sent (never stored), and the AI is neither asked for it nor able to overwrite it. Read it with `getFieldValue`. |
 | `instruction` | Your own line for the AI about this field. Without one, identity fields are listed with the Identity keys (`[[TRAIT_KEYS]]`), and root / profile fields get one shared line in the tracking rules. |
+
+**Sections (API 13).** `sections: [{ id, label, hint?, before?, after?, prompt? }]` adds a section to the card editor next to Identity and Profile. `before` / `after` is `'identity'`, `'profile'` or another section's id (default: the end). Fields join it with `place: '<id>'`. In the prompt it is its own element after `<identity/>`, named `prompt` (default: the id): `<biography goals="…" likes="…"/>`; a section with no values is left out. Its fields are asked for in the tracking rules like root / profile fields.
+
+```js
+api.registerExtension({
+    id: 'my_bio',
+    sections: [{ id: 'biography', label: 'Biography', after: 'profile' }],
+    fields: [
+        { name: 'Goals', place: 'biography' },
+        { name: 'Primary hormone', place: 'identity', after: 'gender', dependsOn: 'gender',
+          derive: { 'male|man|boy': 'testosterone', 'female|woman|girl': 'estrogen', '*': 'N/A' } },
+    ],
+});
+```
 
 Values are stored in your extension's data on the card, `ext[<id>][key]`, so they are copied into chats with the card, roll back with swipes, show in the Sync dialog, and work with `getExtData` / `setExtData`. Fields are for NPC cards (not the persona).
 
@@ -176,7 +194,7 @@ The Wardrobe extension is the full example: its catalog is the character's wardr
 
 | Member | Description |
 |---|---|
-| `apiVersion` / `version` | `12`. |
+| `apiVersion` / `version` | `13`. |
 | `registerExtension(def)` / `unregisterExtension(id)` | See section 3. |
 | `getScene()` | `{ roster: [{ id, name, instance, template }], userName }`: who is in the scene now (`template` equals `instance`; it is kept for older extensions). |
 | `getRosterAt(messageIndex)` | Who was in the scene at a chat message. |
@@ -188,7 +206,9 @@ The Wardrobe extension is the full example: its catalog is the character's wardr
 | `getSettings()` | NPC Book's settings (read only): `postures`, `states`, `conditions`, `trackOutfits`, `traitKeys`, … |
 | `openSheet(ref, extId, { scope })` | Open an extension's sheet for a character in a popup (`'instance'`, `'template'` or `'persona'`). |
 | `getPersonaData(extId)` | Your persona-sheet data. |
-| `getFields()` | Every registered field, normalized: `[{ extId, name, place, before, after, type, prompt, key, placeholder, instruction }]` (API 12). |
+| `getFields()` | Every registered field, normalized: `[{ extId, name, place, before, after, type, prompt, key, placeholder, instruction, dependsOn, derive }]` (API 12). |
+| `getSections()` | Every registered section: `[{ extId, id, label, hint, before, after, prompt }]` (API 13). |
+| `getFieldValue(ref, name, { scope })` | One field's value for a character, derived fields worked out. `name`: an extension field's prompt name or label, an Identity key, a profile field, `name` or `id`. `scope`: `'instance'` (default) or `'template'` (API 13). |
 | `getExtData(ref, extId, { scope })` | A copy of the data for one character. `scope`: `'instance'` (default), `'template'`, `'persona'`, `'user'`. For `persona`/`user`, `ref` is ignored. |
 | `setExtData(ref, extId, data, { scope })` | Write and save the data, then refresh the scene bar and prompts. Returns `true` when written. The `instance` and `user` scopes write to the latest message, like a manual edit. |
 | `refreshScene()` | Redraw the scene bar and refresh the prompts. |
@@ -274,3 +294,4 @@ Listen on `document`:
 | 10 | `sceneSide` and `isEnemy(ref)`: the scene bar shows friendly characters left and enemies right, with a divider. |
 | 11 | `markDead(id)`; tracker entries with `"dead": true` remove the character from the scene for good (instance kept, marked dead). |
 | 12 | `fields`: values placed in a card's root / Identity / Profile section, with position, type and prompt-return name; `getFields()`. |
+| 13 | `sections` (new card sections, own prompt element), derived fields (`dependsOn` + `derive`), `getSections()`, `getFieldValue()`. |

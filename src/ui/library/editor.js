@@ -1,6 +1,6 @@
 // NPC card editor in the Library window: render, bind and save.
 
-import { arrangeFields, customFields, fieldInputHtml, fieldValue, readFieldInputs } from '../../core/fields.js';
+import { arrangeFields, customFields, customSections, fieldInputHtml, fieldValue, readFieldInputs } from '../../core/fields.js';
 import { HEX_RE } from '../../constants.js';
 import { ctx, hasChat } from '../../core/context.js';
 import { allFolders, normFolder, registerFolder } from '../../core/folders.js';
@@ -70,6 +70,20 @@ export function selectTemplate(id, isNew = false, tab = 'card') {
         { key: 'sexuality', html: `<label>Sexuality<input class="text_pole npcb-ed-sexuality" value="${esc(t.sexuality ?? '')}" placeholder="e.g. heterosexual, bisexual, gay, asexual"></label>` },
         { key: 'sexualExperience', html: `<label>Sexual experience<input class="text_pole npcb-ed-sexexp" value="${esc(t.sexualExperience ?? '')}" placeholder="e.g. virgin, experienced"></label>` },
     ], 'profile');
+    // Identity, Profile, then sister extensions' sections (API 13) at their before/after anchors.
+    const sectionsHtml = arrangeFields([
+        { key: 'identity', html: `<div class="npcb-ed-traits">
+        <div><b>Identity</b> <small class="npcb-dim">(used to tell same-name characters apart; empty fields fall back to searching the Details text)</small></div>
+        ${identityHtml}
+      </div>` },
+        { key: 'profile', html: `<div class="npcb-ed-traits npcb-ed-profile">
+        <div><b>Profile</b> <small class="npcb-dim">(sent to the LLM; not used for matching)</small></div>
+        ${profileHtml}
+      </div>` },
+    ], customSections(), sec => ({ key: sec.id, html: `<div class="npcb-ed-traits npcb-ed-section" data-section="${esc(sec.id)}">
+        <div><b>${esc(sec.label)}</b>${sec.hint ? ` <small class="npcb-dim">(${esc(sec.hint)})</small>` : ''}</div>
+        ${withFields([], sec.id)}
+      </div>` })).map(x => x.html).join('\n      ');
     ed.html(`
       <div class="npcb-tabs"><div class="npcb-tab ${tab === 'card' ? 'active' : ''}" data-tab="card">Card</div><div class="npcb-tab ${tab === 'outfit' ? 'active' : ''}" data-tab="outfit">Outfit</div>${extTabs.map(x => `<div class="npcb-tab ${tab === `ext:${x.id}` ? 'active' : ''}" data-tab="ext:${esc(x.id)}">${esc(x.cardTab.label || x.id)}</div>`).join('')}</div>
       <div class="npcb-tabpane" data-pane="card" ${tab === 'card' ? '' : 'style="display:none"'}>
@@ -94,14 +108,7 @@ export function selectTemplate(id, isNew = false, tab = 'card') {
         <div><b>Dialogue examples</b> <small class="npcb-dim">(sent to the LLM; mood examples only while this NPC is in that mood)</small></div>
         <div class="npcb-dx-host"></div>
       </div>
-      <div class="npcb-ed-traits">
-        <div><b>Identity</b> <small class="npcb-dim">(used to tell same-name characters apart; empty fields fall back to searching the Details text)</small></div>
-        ${identityHtml}
-      </div>
-      <div class="npcb-ed-traits npcb-ed-profile">
-        <div><b>Profile</b> <small class="npcb-dim">(sent to the LLM; not used for matching)</small></div>
-        ${profileHtml}
-      </div>
+      ${sectionsHtml}
       </div>
       <div class="npcb-tabpane" data-pane="outfit" ${tab === 'outfit' ? '' : 'style="display:none"'}>
         <small class="npcb-dim">What ${esc(t.name || 'this NPC')} wears when a chat first meets them. Click a slot to dress it.</small>
@@ -196,6 +203,8 @@ export function selectTemplate(id, isNew = false, tab = 'card') {
         const p = ed.find('.npcb-ed-pronouns');
         if (p.attr('data-auto') !== '0') p.val(defaultPronouns(e.target.value));
     });
+    // Derived fields (API 13) follow their source while it is edited.
+    ed.on('input.npcb change.npcb', '.npcb-tabpane[data-pane="card"] input', () => refreshDerivedFields(ed, t));
     ed.on('click.npcb', '.npcb-ed-save', () => saveTemplateFromEditor(t, isNew));
     ed.on('click.npcb', '.npcb-ed-scene', () => {
         if (!hasChat()) { toastr.warning('Open a chat first.', 'NPC Book'); return; }
@@ -219,6 +228,35 @@ export function selectTemplate(id, isNew = false, tab = 'card') {
         renderRoster();
     });
     renderAssist();
+}
+
+/** The card as the editor shows it now (unsaved), for working out derived fields. */
+function editorCard(ed, t) {
+    const traits = {};
+    ed.find('.npcb-ed-trait').each((_, el) => { traits[$(el).data('key')] = String($(el).val() ?? '').trim(); });
+    const ext = clone(libState.draftExt || {});
+    readFieldInputs(ed.find('.npcb-tabpane[data-pane="card"]'), ext);
+    return {
+        ...t, traits, ext,
+        id: String(ed.find('.npcb-ed-id').val() ?? t.id ?? '').trim(),
+        name: String(ed.find('.npcb-ed-name').val() ?? '').trim(),
+        height: String(ed.find('.npcb-ed-height').val() ?? '').trim(),
+        pronouns: String(ed.find('.npcb-ed-pronouns').val() ?? '').trim(),
+        sexuality: String(ed.find('.npcb-ed-sexuality').val() ?? '').trim(),
+        sexualExperience: String(ed.find('.npcb-ed-sexexp').val() ?? '').trim(),
+    };
+}
+
+/** Update every derived field's read-only box from the editor's current values. */
+function refreshDerivedFields(ed, t) {
+    const boxes = ed.find('.npcb-ed-derived');
+    if (!boxes.length) return;
+    const card = editorCard(ed, t);
+    const fields = customFields();
+    boxes.each((_, el) => {
+        const f = fields.find(x => x.extId === el.dataset.ext && x.key === el.dataset.key);
+        if (f) $(el).val(String(fieldValue(card, f) ?? ''));
+    });
 }
 
 async function saveTemplateFromEditor(t, isNew) {

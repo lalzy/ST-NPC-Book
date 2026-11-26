@@ -4,7 +4,7 @@ import { SLOT_LABEL } from '../constants.js';
 import { ctx, hasChat } from '../core/context.js';
 import { profileOf } from '../core/npcs.js';
 import { pipe } from '../core/extHooks.js';
-import { attrsWithFields } from '../core/fields.js';
+import { attrsWithFields, sectionXml } from '../core/fields.js';
 import { extensions } from '../core/runtime.js';
 import { settings } from '../core/settings.js';
 import { indent, xa, xt } from '../core/utils.js';
@@ -103,6 +103,7 @@ function buildCharBlock(inst) {
     const idAttrs = attrsWithFields(s.traitKeys.map(k => ({ key: k, text: t?.traits?.[k] ? ` ${k}="${xa(t.traits[k])}"` : '' })), t, 'identity')
         + attrsWithFields(PROFILE_FIELDS.map(f => ({ key: f.key, text: prof[f.key] ? ` ${f.attr}="${xa(prof[f.key])}"` : '' })), t, 'profile');
     if (idAttrs) inner.push(`<identity${idAttrs}/>`);
+    inner.push(...sectionXml(t)); // sister extensions' sections (API 13), e.g. <biography goals="…"/>
     const details = (t?.details ?? '').trim();
     if (details) inner.push(`<details>${xt(details)}</details>`);
     const examples = dialogueExamplesFor(t, inst);
