@@ -1,0 +1,48 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Example 3: restyle NPC Book's scene bar.
+
+   NPC Book's main class names (scene bar):
+     #npcb_roster / .npcb-roster   the whole bar above the chat input
+     .npcb-roster-head             its top row ("In scene", icons)
+     .npcb-roster-cards            the row of characters
+     .npcb-card                    one character (avatar + name + sub-line)
+     .npcb-ava                     an avatar picture
+     .npcb-card-name               a character's name
+     .npcb-card-sub                the small line under it (posture · state)
+     .npcb-user-card               your persona's card
+     .npcb-popover                 the popup when you click a character
+
+   Every rule starts with body.npcbx-restyle so the scene-bar switch
+   (index.js) can turn it on and off.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* 1. Round avatars with a coloured ring. */
+body.npcbx-restyle .npcb-roster .npcb-ava {
+    border-radius: 50%;
+    box-shadow: 0 0 0 2px var(--SmartThemeQuoteColor, #e0a040);
+}
+
+/* 2. A little lift when you hover a character. */
+body.npcbx-restyle .npcb-card {
+    transition: transform .15s, background .15s;
+}
+body.npcbx-restyle .npcb-card:hover {
+    transform: translateY(-3px);
+}
+
+/* 3. Bold names in the theme's accent colour. */
+body.npcbx-restyle .npcb-card-name {
+    font-weight: bold;
+    color: var(--SmartThemeQuoteColor, #e0a040);
+}
+
+/* 4. Hide the small posture/state line for a cleaner bar. */
+body.npcbx-restyle .npcb-card-sub {
+    display: none;
+}
+
+/* 5. Your persona card gets a dashed outline so it stands apart from NPCs. */
+body.npcbx-restyle .npcb-user-card {
+    outline: 1px dashed var(--SmartThemeBorderColor, #888);
+    outline-offset: -2px;
+}
