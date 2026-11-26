@@ -5,6 +5,7 @@ import { ctx, excludedNames } from '../core/context.js';
 import { newNpcFolder, registerFolder } from '../core/folders.js';
 import { pickColor } from '../core/npcs.js';
 import { outfitCatalog, runEntryHooks, transformEntries } from '../core/extHooks.js';
+import { customFields, fieldKey, fieldsFromEntry, mergeFieldValues } from '../core/fields.js';
 import { addToLibrary, allTemplates, claimingLibrary } from '../core/libraries.js';
 import { extensions, runtime } from '../core/runtime.js';
 import { lib, save, settings } from '../core/settings.js';
@@ -253,6 +254,13 @@ export async function processLastMessage() {
                         for (const ext of extensions.values()) {
                             if (typeof ext.fromTracker !== 'function' || !entry) continue;
                             try { const d = ext.fromTracker(entry, t); if (d) { t.ext = t.ext || {}; t.ext[ext.id] = d; } } catch (e) { console.warn(`[NPC Book] ${ext.id} fromTracker failed`, e); }
+                        }
+                        // Fields (API 12): the entry's values go on the new card, not into its Identity traits.
+                        if (entry && customFields().length) {
+                            t.ext = mergeFieldValues(t.ext || {}, fieldsFromEntry(entry));
+                            const own = new Set(s.traitKeys.map(fieldKey));
+                            const taken = new Set(customFields().map(f => fieldKey(f.prompt)));
+                            for (const k of Object.keys(t.traits || {})) if (taken.has(fieldKey(k)) && !own.has(fieldKey(k))) delete t.traits[k];
                         }
                     },
                     // Sister extensions read every entry into their data on this chat's instance (rolls back with swipes).

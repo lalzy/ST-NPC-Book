@@ -8,10 +8,14 @@ Typical uses:
 - **One extra tracked field**, such as occupation, faction, hunger or reputation.
 - **Prompt tweaks**, such as rewriting the scene text or adding your own `[[PLACEHOLDERS]]` to the tracking prompt.
 
-NPC Book's own **Wardrobe** and **Relationships** features are sister extensions built only on this API (`NPCBook-Wardrobe`, `NPCBook-Relationships`), so they are full-size, real examples. Two small, commented examples are in [`examples/`](examples/):
+NPC Book's own **Wardrobe** and **Relationships** features are sister extensions built only on this API (`NPCBook-Wardrobe`, `NPCBook-Relationships`), so they are full-size, real examples. Small, commented examples are in [`examples/`](examples/) (start with [`examples/README.md`](examples/README.md)). The numbered ones go from simplest to more involved:
 
 | Example | Shows |
 |---|---|
+| [`examples/01-identity-field`](examples/01-identity-field/index.js) | Adds one field ("Occupation") to every card's Identity section with `fields` (API 12). |
+| [`examples/02-tab-and-button`](examples/02-tab-and-button/index.js) | A new card tab (`cardTab`) and a new scene-bar button (`sceneButton`). |
+| [`examples/03-restyle`](examples/03-restyle/index.js) | Changes how the scene bar looks with `ui.injectStyle`. |
+| [`examples/06-key-phrase`](examples/06-key-phrase/index.js) | A key phrase in your or the AI's message runs a function (`npcbook:message`, `removeFromScene`). |
 | [`examples/occupation`](examples/occupation/index.js) | One tracked text field, in about 60 lines: editor tab, prompt line, placeholder, reading the AI's entries, scene XML. |
 | [`examples/simple-stats`](examples/simple-stats/index.js) | A stat sheet: HP that the AI changes during play (rolls back with swipes), stats and notes, a scene-bar button, writing data with `setExtData`. |
 
@@ -44,7 +48,7 @@ if (window.NPCBook) register(window.NPCBook);
 else document.addEventListener('npcbook:ready', e => register(e.detail), { once: true });
 ```
 
-Check `api.apiVersion` (currently **11**) if you rely on something newer than the version that introduced it (listed in section 9).
+Check `api.apiVersion` (currently **12**) if you rely on something newer than the version that introduced it (listed in section 9).
 
 ---
 
@@ -93,6 +97,34 @@ Every hook is called inside a try/catch. A hook that throws is logged to the con
 | `sceneButton: { icon, title, active?, onClick(anchorEl) }` | An icon in the scene bar head. | `icon` and `title` are strings or functions returning them (`icon` is a Font Awesome class, such as `'fa-dice-d20'`). `active() === false` dims it. Call `NPCBook.refreshScene()` after changing what it shows. |
 
 Icons default to `fa-table-list` (sheets) and `fa-puzzle-piece` (scene buttons).
+
+### Fields: values in the card's own sections (API 12)
+
+`fields` adds values to every NPC card that sit among NPC Book's own fields instead of on a tab. NPC Book draws them in the card editor, sends them in `{{npcScene}}`, asks the AI for them and stores what it writes back. No other hook is needed.
+
+```js
+api.registerExtension({
+    id: 'my_ext',
+    fields: [
+        { name: 'Occupation', place: 'identity' },
+        { name: 'Goals', place: 'profile', after: 'pronouns', prompt: 'life-goal' },
+        { name: 'Title', place: 'root', before: 'name' },
+    ],
+});
+```
+
+| Member | Notes |
+|---|---|
+| `name` | Required. The label in the card editor (`"Goals"`). |
+| `place` | `'root'`, `'identity'` (default) or `'profile'`. **root**: the card's top block (ID, Name, Folder, Dialogue color); in the prompt, an attribute of `<char …>`. **identity**: the Identity section; in the prompt, an attribute of `<identity …/>` among the Identity keys. **profile**: the Profile section; in the prompt, an attribute of `<identity …/>` among the profile attributes. |
+| `before` / `after` | An existing field of that place to sit next to, in the editor and in the prompt. root: `id`, `name`, `folder`, `color` (the prompt has only `name` and `id`). identity: your Identity keys (Settings → Identity keys). profile: `height`, `pronouns`, `sexuality`, `sexual_experience`. Another extension's field can be named by its `prompt`. Not given or not found: the end of the section. |
+| `type` | `'string'` (default), `'number'` or `'boolean'` (a checkbox; sent only when true). |
+| `prompt` | The prompt-return name: the attribute the AI sees (`life-goal="to become a super star"`) and the key it writes back in a tracker or greeting entry (top level or inside `"traits"`; `life_goal` and `Life Goal` match too). Default: `name` in lower case, spaces as `_`. |
+| `key` | Storage key. Default: `prompt`. |
+| `placeholder` | Grey hint text in the empty box. |
+| `instruction` | Your own line for the AI about this field. Without one, identity fields are listed with the Identity keys (`[[TRAIT_KEYS]]`), and root / profile fields get one shared line in the tracking rules. |
+
+Values are stored in your extension's data on the card, `ext[<id>][key]`, so they are copied into chats with the card, roll back with swipes, show in the Sync dialog, and work with `getExtData` / `setExtData`. Fields are for NPC cards (not the persona).
 
 ### Window header and extension libraries (API 9)
 
@@ -144,7 +176,7 @@ The Wardrobe extension is the full example: its catalog is the character's wardr
 
 | Member | Description |
 |---|---|
-| `apiVersion` / `version` | `11`. |
+| `apiVersion` / `version` | `12`. |
 | `registerExtension(def)` / `unregisterExtension(id)` | See section 3. |
 | `getScene()` | `{ roster: [{ id, name, instance, template }], userName }`: who is in the scene now (`template` equals `instance`; it is kept for older extensions). |
 | `getRosterAt(messageIndex)` | Who was in the scene at a chat message. |
@@ -156,6 +188,7 @@ The Wardrobe extension is the full example: its catalog is the character's wardr
 | `getSettings()` | NPC Book's settings (read only): `postures`, `states`, `conditions`, `trackOutfits`, `traitKeys`, … |
 | `openSheet(ref, extId, { scope })` | Open an extension's sheet for a character in a popup (`'instance'`, `'template'` or `'persona'`). |
 | `getPersonaData(extId)` | Your persona-sheet data. |
+| `getFields()` | Every registered field, normalized: `[{ extId, name, place, before, after, type, prompt, key, placeholder, instruction }]` (API 12). |
 | `getExtData(ref, extId, { scope })` | A copy of the data for one character. `scope`: `'instance'` (default), `'template'`, `'persona'`, `'user'`. For `persona`/`user`, `ref` is ignored. |
 | `setExtData(ref, extId, data, { scope })` | Write and save the data, then refresh the scene bar and prompts. Returns `true` when written. The `instance` and `user` scopes write to the latest message, like a manual edit. |
 | `refreshScene()` | Redraw the scene bar and refresh the prompts. |
@@ -190,7 +223,9 @@ Listen on `document`:
 
 ## 6. Recipes
 
-**Add one tracked field (such as occupation).** Use `defaultData`, `cardTab`, `instructions` (tell the AI the key), `fromTracker` (new NPCs), `onTrackerEntry` (changes), `entryKeys` (greetings) and `sceneXml`. See `examples/occupation`.
+**Add one field to a card section (such as occupation in Identity).** Use `fields`. See `examples/01-identity-field`.
+
+**Add one tracked field on its own tab.** Use `defaultData`, `cardTab`, `instructions` (tell the AI the key), `fromTracker` (new NPCs), `onTrackerEntry` (changes), `entryKeys` (greetings) and `sceneXml`. See `examples/occupation`.
 
 **A game-system stat sheet.** Same as above, plus `personaSheet` for the player. Keep values the AI changes during play (HP, momentum, conditions) in `onTrackerEntry` so they roll back with swipes. See `examples/simple-stats`.
 
@@ -238,3 +273,4 @@ Listen on `document`:
 | 9 | `modalButton` (NPC Book window header) and `templateLibrary` (extension card stores, e.g. a Bestiary; ids unique across all libraries; new characters can be claimed by a library). API: `getAnyTemplate`, `getAllTemplates`, `isIdTaken`, `uniqueTemplateId`, `libraryOf`, `addToScene`, `removeFromScene`, `getCardTabs`, `closeLibrary`, `refreshModalButtons`. `resolveNpc` also looks in extension libraries. |
 | 10 | `sceneSide` and `isEnemy(ref)`: the scene bar shows friendly characters left and enemies right, with a divider. |
 | 11 | `markDead(id)`; tracker entries with `"dead": true` remove the character from the scene for good (instance kept, marked dead). |
+| 12 | `fields`: values placed in a card's root / Identity / Profile section, with position, type and prompt-return name; `getFields()`. |

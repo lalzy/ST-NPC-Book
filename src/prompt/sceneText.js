@@ -4,6 +4,7 @@ import { SLOT_LABEL } from '../constants.js';
 import { ctx, hasChat } from '../core/context.js';
 import { profileOf } from '../core/npcs.js';
 import { pipe } from '../core/extHooks.js';
+import { attrsWithFields } from '../core/fields.js';
 import { extensions } from '../core/runtime.js';
 import { settings } from '../core/settings.js';
 import { indent, xa, xt } from '../core/utils.js';
@@ -98,8 +99,9 @@ function buildCharBlock(inst) {
     const name = t?.name ?? inst.name ?? inst.id;
     const inner = [];
     const prof = profileOf(t);
-    const idAttrs = s.traitKeys.map(k => (t?.traits?.[k] ? ` ${k}="${xa(t.traits[k])}"` : '')).join('')
-        + PROFILE_FIELDS.map(f => (prof[f.key] ? ` ${f.attr}="${xa(prof[f.key])}"` : '')).join('');
+    // Sister extensions' fields (API 12) sit among the Identity / Profile attributes at their before/after anchors.
+    const idAttrs = attrsWithFields(s.traitKeys.map(k => ({ key: k, text: t?.traits?.[k] ? ` ${k}="${xa(t.traits[k])}"` : '' })), t, 'identity')
+        + attrsWithFields(PROFILE_FIELDS.map(f => ({ key: f.key, text: prof[f.key] ? ` ${f.attr}="${xa(prof[f.key])}"` : '' })), t, 'profile');
     if (idAttrs) inner.push(`<identity${idAttrs}/>`);
     const details = (t?.details ?? '').trim();
     if (details) inner.push(`<details>${xt(details)}</details>`);
@@ -113,7 +115,9 @@ function buildCharBlock(inst) {
     if (inst.feelings) inner.push(`<feelings>${xt(inst.feelings)}</feelings>`);
     inner.push(...outfitXml(inst.outfit, t?.wardrobe, !!inst.dressed));
     inner.push(...extXml({ kind: 'char', name, id: inst.id, template: t, instance: inst }));
-    return [`<char name="${xa(name)}" id="${xa(inst.id)}">`, ...inner.map(x => indent(x, 2)), '</char>'].join('\n');
+    // Root fields (API 12) are attributes of <char>, before / after name and id.
+    const rootAttrs = attrsWithFields([{ key: 'name', text: ` name="${xa(name)}"` }, { key: 'id', text: ` id="${xa(inst.id)}"` }], t, 'root');
+    return [`<char${rootAttrs}>`, ...inner.map(x => indent(x, 2)), '</char>'].join('\n');
 }
 
 export function buildSceneText() {

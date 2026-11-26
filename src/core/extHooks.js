@@ -1,6 +1,7 @@
 // Calls into registered sister extensions. Every call is guarded: a failing extension is logged and skipped,
 // so it can never break NPC Book itself. With no extensions registered, every helper is a no-op.
 
+import { customFields, fieldsFromEntry, mergeFieldValues } from './fields.js';
 import { extensions } from './runtime.js';
 
 /** Registered extensions that define `hook` as a function, in registration order. */
@@ -30,6 +31,7 @@ export function pipe(hook, value, ...args) {
 export function claimedEntryKeys() {
     const out = new Set();
     for (const ext of extensions.values()) for (const k of Array.isArray(ext?.entryKeys) ? ext.entryKeys : []) out.add(String(k).toLowerCase());
+    for (const f of customFields()) out.add(f.prompt.toLowerCase()); // fields (API 12) are read by NPC Book itself
     return out;
 }
 
@@ -39,6 +41,15 @@ export function claimedEntryKeys() {
  * The hook gets a copy of the data; returning undefined leaves the stored data alone.
  */
 export function runEntryHooks(info, getData, setData) {
+    // Fields (registerExtension({ fields }), API 12): values the LLM wrote under a field's prompt name go into that
+    // extension's data first, so its own onTrackerEntry already sees them. NPC characters only.
+    if (info.kind === 'char') {
+        for (const [extId, patch] of Object.entries(fieldsFromEntry(info.entry))) {
+            const cur = getData(extId);
+            const box = { [extId]: cur === undefined || cur === null ? {} : JSON.parse(JSON.stringify(cur)) };
+            setData(extId, mergeFieldValues(box, { [extId]: patch })[extId]);
+        }
+    }
     for (const ext of extsWith('onTrackerEntry')) {
         const cur = getData(ext.id);
         const data = cur === undefined || cur === null ? null : JSON.parse(JSON.stringify(cur));

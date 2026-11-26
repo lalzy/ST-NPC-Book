@@ -1,5 +1,6 @@
 // NPC card editor in the Library window: render, bind and save.
 
+import { arrangeFields, customFields, fieldInputHtml, fieldValue, readFieldInputs } from '../../core/fields.js';
 import { HEX_RE } from '../../constants.js';
 import { ctx, hasChat } from '../../core/context.js';
 import { allFolders, normFolder, registerFolder } from '../../core/folders.js';
@@ -47,6 +48,28 @@ export function selectTemplate(id, isNew = false, tab = 'card') {
     libState.draftExt = clone(t.ext || {});
     libState.draftDialogue = clone(t.dialogue || []);
     const extTabs = [...extensions.values()].filter(x => x.cardTab);
+    // Sister extensions' fields (API 12) are placed among each section's own fields, at their before/after anchors.
+    const withFields = (items, place) => arrangeFields(items, customFields(place), f => ({ key: f.prompt, html: fieldInputHtml(f, fieldValue(t, f, libState.draftExt)) })).map(x => x.html).join('');
+    const rootHtml = withFields([
+        { key: 'id', html: `<label>ID ${isNew ? '<small class="npcb-dim">(unique, cannot be changed later)</small>' : '<small class="npcb-dim">(locked)</small>'}
+            <input class="text_pole npcb-ed-id" value="${esc(t.id)}" ${isNew ? '' : 'disabled'} placeholder="auto from name"></label>` },
+        { key: 'name', html: `<label>Name<input class="text_pole npcb-ed-name" value="${esc(t.name)}" placeholder="Display name"></label>` },
+        { key: 'folder', html: `<label>Folder<input class="text_pole npcb-ed-folder" list="npcb_folder_list" value="${esc(t.folder || '')}" placeholder="none (top level) — use / for subfolders"></label>
+          <datalist id="npcb_folder_list">${allFolders().map(f => `<option value="${esc(f)}"></option>`).join('')}</datalist>` },
+        { key: 'color', html: `<label>Dialogue color <small class="npcb-dim">(their dialogue in speaker cards, and their name in the scene bar)</small>
+            <div class="npcb-row npcb-color-row">
+              <input type="color" class="npcb-ed-color" value="${HEX_RE.test(t.color || '') ? t.color : '#ffffff'}">
+              <input class="text_pole npcb-ed-colorhex" value="${esc(t.color || '')}" placeholder="#RRGGBB (empty = none)">
+              <span class="npcb-color-preview" style="color:${HEX_RE.test(t.color || '') ? t.color : 'inherit'}">"Sample line."</span>
+            </div></label>` },
+    ], 'root');
+    const identityHtml = withFields(traitKeys.map(k => ({ key: k, html: `<label>${esc(k)}<input class="text_pole npcb-ed-trait" data-key="${esc(k)}" value="${esc(t.traits?.[k] ?? '')}"></label>` })), 'identity');
+    const profileHtml = withFields([
+        { key: 'height', html: `<label>Height<input class="text_pole npcb-ed-height" value="${esc(t.height ?? '')}" placeholder="e.g. 170 cm, tall"></label>` },
+        { key: 'pronouns', html: `<label>Pronouns<input class="text_pole npcb-ed-pronouns" value="${esc(String(t.pronouns ?? '').trim() || defaultPronouns(t.traits?.gender))}" data-auto="${String(t.pronouns ?? '').trim() ? '0' : '1'}" placeholder="he/him, she/her, they/them"></label>` },
+        { key: 'sexuality', html: `<label>Sexuality<input class="text_pole npcb-ed-sexuality" value="${esc(t.sexuality ?? '')}" placeholder="e.g. heterosexual, bisexual, gay, asexual"></label>` },
+        { key: 'sexualExperience', html: `<label>Sexual experience<input class="text_pole npcb-ed-sexexp" value="${esc(t.sexualExperience ?? '')}" placeholder="e.g. virgin, experienced"></label>` },
+    ], 'profile');
     ed.html(`
       <div class="npcb-tabs"><div class="npcb-tab ${tab === 'card' ? 'active' : ''}" data-tab="card">Card</div><div class="npcb-tab ${tab === 'outfit' ? 'active' : ''}" data-tab="outfit">Outfit</div>${extTabs.map(x => `<div class="npcb-tab ${tab === `ext:${x.id}` ? 'active' : ''}" data-tab="ext:${esc(x.id)}">${esc(x.cardTab.label || x.id)}</div>`).join('')}</div>
       <div class="npcb-tabpane" data-pane="card" ${tab === 'card' ? '' : 'style="display:none"'}>
@@ -54,17 +77,7 @@ export function selectTemplate(id, isNew = false, tab = 'card') {
         <div class="npcb-ed-portrait" title="Click to set portrait">${avatarHtml(t, t.name || '?', 'npcb-ava-lg')}</div>
         <input type="file" class="npcb-ed-file" accept="image/*" hidden>
         <div class="npcb-ed-ident">
-          <label>ID ${isNew ? '<small class="npcb-dim">(unique, cannot be changed later)</small>' : '<small class="npcb-dim">(locked)</small>'}
-            <input class="text_pole npcb-ed-id" value="${esc(t.id)}" ${isNew ? '' : 'disabled'} placeholder="auto from name"></label>
-          <label>Name<input class="text_pole npcb-ed-name" value="${esc(t.name)}" placeholder="Display name"></label>
-          <label>Folder<input class="text_pole npcb-ed-folder" list="npcb_folder_list" value="${esc(t.folder || '')}" placeholder="none (top level) — use / for subfolders"></label>
-          <datalist id="npcb_folder_list">${allFolders().map(f => `<option value="${esc(f)}"></option>`).join('')}</datalist>
-          <label>Dialogue color <small class="npcb-dim">(their dialogue in speaker cards, and their name in the scene bar)</small>
-            <div class="npcb-row npcb-color-row">
-              <input type="color" class="npcb-ed-color" value="${HEX_RE.test(t.color || '') ? t.color : '#ffffff'}">
-              <input class="text_pole npcb-ed-colorhex" value="${esc(t.color || '')}" placeholder="#RRGGBB (empty = none)">
-              <span class="npcb-color-preview" style="color:${HEX_RE.test(t.color || '') ? t.color : 'inherit'}">"Sample line."</span>
-            </div></label>
+          ${rootHtml}
           <div class="npcb-row npcb-ed-portrait-btns">
             <div class="menu_button npcb-ed-setimg"><i class="fa-solid fa-image"></i> Portrait</div>
             <div class="menu_button npcb-ed-cropimg" title="Crop portrait"><i class="fa-solid fa-crop-simple"></i> Crop</div>
@@ -83,14 +96,11 @@ export function selectTemplate(id, isNew = false, tab = 'card') {
       </div>
       <div class="npcb-ed-traits">
         <div><b>Identity</b> <small class="npcb-dim">(used to tell same-name characters apart; empty fields fall back to searching the Details text)</small></div>
-        ${traitKeys.map(k => `<label>${esc(k)}<input class="text_pole npcb-ed-trait" data-key="${esc(k)}" value="${esc(t.traits?.[k] ?? '')}"></label>`).join('')}
+        ${identityHtml}
       </div>
       <div class="npcb-ed-traits npcb-ed-profile">
         <div><b>Profile</b> <small class="npcb-dim">(sent to the LLM; not used for matching)</small></div>
-        <label>Height<input class="text_pole npcb-ed-height" value="${esc(t.height ?? '')}" placeholder="e.g. 170 cm, tall"></label>
-        <label>Pronouns<input class="text_pole npcb-ed-pronouns" value="${esc(String(t.pronouns ?? '').trim() || defaultPronouns(t.traits?.gender))}" data-auto="${String(t.pronouns ?? '').trim() ? '0' : '1'}" placeholder="he/him, she/her, they/them"></label>
-        <label>Sexuality<input class="text_pole npcb-ed-sexuality" value="${esc(t.sexuality ?? '')}" placeholder="e.g. heterosexual, bisexual, gay, asexual"></label>
-        <label>Sexual experience<input class="text_pole npcb-ed-sexexp" value="${esc(t.sexualExperience ?? '')}" placeholder="e.g. virgin, experienced"></label>
+        ${profileHtml}
       </div>
       </div>
       <div class="npcb-tabpane" data-pane="outfit" ${tab === 'outfit' ? '' : 'style="display:none"'}>
@@ -225,6 +235,8 @@ async function saveTemplateFromEditor(t, isNew) {
     let color = String(ed.find('.npcb-ed-colorhex').val() ?? '').trim();
     if (/^[0-9a-f]{6}$/i.test(color)) color = `#${color}`;
     if (color && !HEX_RE.test(color)) { toastr.warning('Dialogue color must look like #RRGGBB (or be empty).', 'NPC Book'); return; }
+    // Sister extensions' fields (API 12) are stored in their extension's data on the card.
+    readFieldInputs(ed.find('.npcb-tabpane[data-pane="card"]'), libState.draftExt);
     const traits = {};
     ed.find('.npcb-ed-trait').each((_, el) => { traits[$(el).data('key')] = String($(el).val() ?? '').trim(); });
     let portrait = t.portrait || '';

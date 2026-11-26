@@ -3,6 +3,7 @@
 import { DEFAULT_USER_RULE, TRAIT_SAMPLES } from '../constants.js';
 import { ctx, excludedNames, hasChat } from '../core/context.js';
 import { extsWith, pipe } from '../core/extHooks.js';
+import { fieldInstructions, fieldKey, identityFieldPrompts } from '../core/fields.js';
 import { extensions } from '../core/runtime.js';
 import { allTemplates } from '../core/libraries.js';
 import { lib, settings } from '../core/settings.js';
@@ -24,7 +25,9 @@ export function buildInstructionText() {
     const s = settings();
     if (!s.enabled || !hasChat()) return '';
     const c = ctx();
-    const keys = s.traitKeys.length ? s.traitKeys : ['race', 'age', 'gender', 'role'];
+    const baseKeys = s.traitKeys.length ? s.traitKeys : ['race', 'age', 'gender', 'role'];
+    // Identity fields from sister extensions (API 12) are asked for like the Identity keys, under their prompt name.
+    const keys = [...baseKeys, ...identityFieldPrompts().filter(k => !baseKeys.some(b => fieldKey(b) === fieldKey(k)))];
     // Known NPCs: only the people this chat has met (its instances), by id and name. Library templates are never sent:
     // the LLM brings in whoever it needs and the tracker matches the name (see findLookups). Details of an NPC are sent
     // only through {{npcScene}}, while that NPC is in the scene.
@@ -34,7 +37,7 @@ export function buildInstructionText() {
     const libLines = Object.values(scene.instances).sort(byName).map(t => `${t.id}: ${t.name}`);
     const text = String(s.instructions || '')
         .replaceAll('[[SPEAKER_RULE]]', s.enabled && s.speakerPortraits ? s.speakerRule : '')
-        .replaceAll('[[OUTFIT_RULES]]', [s.trackOutfits ? s.outfitRules : '', trackUser ? DEFAULT_USER_RULE : '', ...extInstructions()].filter(Boolean).join('\n'))
+        .replaceAll('[[OUTFIT_RULES]]', [s.trackOutfits ? s.outfitRules : '', trackUser ? DEFAULT_USER_RULE : '', fieldInstructions(), ...extInstructions()].filter(Boolean).join('\n'))
         .replaceAll('[[USER_EXAMPLE]]', trackUser ? `,\n  {"id": "user", "posture": "${s.postures[1] ?? s.postures[0] ?? 'Sitting'}"}` : '')
         .replaceAll('[[MAX_NEW]]', String(Number(s.maxNewPerReply) > 0 ? Number(s.maxNewPerReply) : 2))
         .replaceAll('[[CONDITIONS]]', s.conditions.join(', '))

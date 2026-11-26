@@ -5,6 +5,7 @@ import { SLOT_LABEL } from './constants.js';
 import { ctx, hasChat } from './core/context.js';
 import { extensions } from './core/runtime.js';
 import { lib, save, settings } from './core/settings.js';
+import { customFields } from './core/fields.js';
 import { allTemplates, anyTemplate, idTaken, libraryOf } from './core/libraries.js';
 import { clone, esc, indent, initials, xa, xt } from './core/utils.js';
 import { cloneScene } from './logic/instances.js';
@@ -37,8 +38,9 @@ import { bindTabs } from './ui/tabs.js';
  *  isIdTaken, uniqueTemplateId, getAnyTemplate, getAllTemplates, getCardTabs, libraryOf, addToScene, removeFromScene, closeLibrary, refreshModalButtons.
  *  10 added sceneSide (scene bar split: friendly left, enemies right) and isEnemy.
  *  11 added markDead, and "dead": true in tracker entries (a dead character leaves the scene for good; its instance is kept, marked dead).
+ *  12 added fields: values on every NPC card, placed in the card's root / Identity / Profile section, sent to and read from the LLM; getFields.
  *  Full contract: EXTENDING.md. */
-export const API_VERSION = 11;
+export const API_VERSION = 12;
 
 /** Open an extension's sheet for one character in a popup. scope: 'instance' (this chat), 'template' (card), 'persona'. */
 function openSheet(ref, extId, { scope = 'instance' } = {}) {
@@ -118,7 +120,8 @@ export function exposePublicApi() {
          *         onTrackerEntry?({kind, source, id, name, entry, data, isNew, instance?}) -> data | undefined,
          *         transformEntry?(entry, {source, messageIndex}) -> entry | null | undefined, entryKeys?: [string],
          *         transformInstructions?(text, info) -> text, transformScene?(text, info) -> text,
-         *         sceneButton?: { icon() -> 'fa-…', title() -> string, active?() -> bool, onClick(anchorEl) } }
+         *         sceneButton?: { icon() -> 'fa-…', title() -> string, active?() -> bool, onClick(anchorEl) },
+         *         fields?: [{ name, place?: 'root'|'identity'|'profile', before?, after?, type?: 'string'|'number'|'boolean', prompt?, key?, placeholder?, instruction? }] }
          * sceneButton adds an icon to the scene bar head (next to Add NPC / Folder); active() === false dims it.
          * Call refreshScene() after changing what it shows.
          * Card/persona `data` objects are mutable drafts; NPC Book saves them when the user presses Save.
@@ -174,6 +177,8 @@ export function exposePublicApi() {
         /** Redraw sister extensions' buttons in the NPC Book window header (after their icon / title / active state changed). */
         refreshModalButtons: () => renderModalButtons(),
         getPersonaData: (extId) => personaData().ext?.[extId] ?? null,
+        /** Every registered field (API 12), normalized: [{ extId, name, place, before, after, type, prompt, key, placeholder, instruction }]. */
+        getFields: () => customFields().map(f => ({ ...f })),
         /**
          * Who is in the current scene: [{ id, name, instance, template }] plus your persona's name.
          * `instance` is the chat's own copy (card fields, wardrobe, ext data, live state). `template` is the same object,
