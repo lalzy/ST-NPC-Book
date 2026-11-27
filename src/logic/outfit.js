@@ -62,18 +62,10 @@ export function makeItem(name, slots = null, taken = () => false, note = '') {
     return { id, name: nm, slots: sl, ...(note ? { note: String(note) } : {}) };
 }
 
-/**
- * An outfit as self-contained worn items. Entries saved by older versions ({id, condition} pointing into a wardrobe)
- * are looked up in `legacyWardrobe`; entries that cannot be resolved are dropped (as before, they were not shown).
- */
-export function resolveOutfit(outfit, legacyWardrobe = []) {
+/** An outfit as self-contained worn items (entries without a name are dropped). */
+export function resolveOutfit(outfit) {
     const out = [];
-    for (const w of Array.isArray(outfit) ? outfit : []) {
-        if (!w) continue;
-        if (w.name) { out.push({ ...w, slots: normalizeSlots(w.slots) }); continue; }
-        const it = findItem(legacyWardrobe, w.id);
-        if (it) out.push({ id: it.id, name: it.name, slots: normalizeSlots(it.slots), ...(it.note ? { note: it.note } : {}), condition: w.condition });
-    }
+    for (const w of Array.isArray(outfit) ? outfit : []) if (w?.name) out.push({ ...w, slots: normalizeSlots(w.slots) });
     return out;
 }
 
@@ -183,15 +175,9 @@ export function applyOutfitChange(outfit, change, { conditions = ['Worn'], catal
     return { outfit: r.outfit, created: r.created, rejected: r.rejected };
 }
 
-/** Starting outfit of a template / persona: its own `outfit`, else (older data) its starred wardrobe items. */
-export function startingOutfit(t, conditions = ['Worn']) {
-    if (Array.isArray(t?.outfit)) return resolveOutfit(t.outfit, t.wardrobe || []);
-    let cur = [];
-    for (const id of t?.defaultWorn || []) {
-        const it = findItem(t.wardrobe || [], id);
-        if (it) cur = wearItem(cur, it, conditions?.[0] ?? 'Worn').outfit;
-    }
-    return cur;
+/** Starting outfit of a template / persona: its own `outfit`. */
+export function startingOutfit(t) {
+    return resolveOutfit(t?.outfit);
 }
 
 /** slotKey -> [{item, condition}] for self-contained worn items. */

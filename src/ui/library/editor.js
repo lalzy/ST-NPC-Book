@@ -30,8 +30,6 @@ import { openPortraitMenu, openServerImagePicker } from './portraitPicker.js';
 import { libState } from './state.js';
 
 export function selectTemplate(id, isNew = false, tab = 'card') {
-    // Tabs that moved to sister extensions (older links / remembered tabs).
-    if (tab === 'wardrobe' || tab === 'relationships') tab = extensions.get(tab)?.cardTab ? `ext:${tab}` : (tab === 'wardrobe' ? 'outfit' : 'card');
     resetAssistFor(isNew ? '__new__' : id);
     libState.isNew = isNew;
     libState.selected = isNew ? null : id;
@@ -44,7 +42,7 @@ export function selectTemplate(id, isNew = false, tab = 'card') {
     const s = settings();
     const traitKeys = [...new Set([...s.traitKeys, ...Object.keys(t.traits || {})])];
     const present = hasChat() && !isNew && currentRoster().some(i => i.id === t.id);
-    libState.draftOutfit = startingOutfit(t, s.conditions);
+    libState.draftOutfit = startingOutfit(t);
     libState.draftExt = clone(t.ext || {});
     libState.draftDialogue = clone(t.dialogue || []);
     const extTabs = [...extensions.values()].filter(x => x.cardTab);
@@ -302,7 +300,6 @@ async function saveTemplateFromEditor(t, isNew) {
         created: t.created || Date.now(),
         updated: Date.now(),
     };
-    delete lib()[id].defaultWorn; // the starting outfit is `outfit` now (older cards starred wardrobe items)
     registerFolder(lib()[id].folder);
     save();
     for (const x of extensions.values()) if (x.cardTab && lib()[id].ext?.[x.id] !== undefined) sheetSaved(x, 'cardTab', { id, scope: 'template', data: lib()[id].ext[x.id] });

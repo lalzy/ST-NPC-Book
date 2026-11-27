@@ -17,7 +17,7 @@ export function cleanForImagine(x) {
 function portraitData(t) {
     const s = settings();
     const inst = t.instanceOf ? t : null;
-    const outfit = inst ? resolveOutfit(inst.outfit, t.wardrobe || []) : startingOutfit(t, s.conditions);
+    const outfit = inst ? resolveOutfit(inst.outfit) : startingOutfit(t);
     const wearing = outfit.map(w => `${w.name}${w.condition && w.condition !== s.conditions[0] ? ` (${w.condition})` : ''}`).join(', ');
     const labeled = settings().traitKeys.map(k => (t.traits?.[k] ? `${k}: ${t.traits[k]}` : null)).filter(Boolean).join('; ');
     return {

@@ -4,12 +4,11 @@ import { HEX_RE } from '../../constants.js';
 import { ctx, hasChat } from '../../core/context.js';
 import { settings } from '../../core/settings.js';
 import { clone, esc } from '../../core/utils.js';
-import { cloneScene, ensureSyncBaseline } from '../../logic/instances.js';
+import { cloneScene } from '../../logic/instances.js';
 import { currentScene, writeCurrentScene } from '../../scene/roster.js';
 import { decorateAll } from '../../speakers/decorate.js';
 import { avatarHtml } from '../avatar.js';
 import { mountDialogueExamples } from '../library/dialogueExamples.js';
-import { templateOf } from './templateSync.js';
 
 export async function openInstanceCard(id) {
     if (!hasChat()) return;
@@ -53,7 +52,6 @@ export async function openInstanceCard(id) {
     const scene = cloneScene(currentScene());
     const target = scene.instances[id];
     if (!target) return;
-    ensureSyncBaseline(target, templateOf(target)); // older instances: so this edit is not shown as a template change
     const traits = {};
     box.find('.npcb-ic-trait').each((_, el) => { traits[$(el).data('key')] = String($(el).val() ?? '').trim(); });
     Object.assign(target, {

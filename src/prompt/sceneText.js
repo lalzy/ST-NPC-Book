@@ -24,13 +24,13 @@ function wearingText(outfit) {
     return parts.length ? parts.join('; ') : 'nothing';
 }
 
-/** <wearing> for a character: what they have on now (self-contained items; older saves resolve through `legacyWardrobe`). */
-function outfitXml(outfit, legacyWardrobe, dressed = false) {
+/** <wearing> for a character: what they have on now (self-contained items). */
+function outfitXml(outfit, dressed = false) {
     const s = settings();
     if (!s.trackOutfits) return [];
-    const worn = resolveOutfit(outfit, legacyWardrobe || []);
+    const worn = resolveOutfit(outfit);
     // Someone whose clothing was never set (no outfit, never dressed or undressed) gets no <wearing> line.
-    if (!worn.length && !dressed && !(legacyWardrobe || []).length) return [];
+    if (!worn.length && !dressed) return [];
     const exp = s.describeExposure ? exposureSummary(worn) : '';
     return [`<wearing${exp ? ` exposure="${xa(exp)}"` : ''}>${xt(wearingText(worn))}</wearing>`];
 }
@@ -41,7 +41,7 @@ function extXml(subject) {
     for (const ext of extensions.values()) {
         if (typeof ext.sceneXml !== 'function') continue;
         try {
-            // sceneXmlAlways: also called for characters without data for this extension (e.g. to read older data).
+            // sceneXmlAlways: also called for characters without data for this extension.
             // The user's data: this chat's copy (written by onTrackerEntry / setExtData), else the persona sheet.
             const data = subject.kind === 'user' ? (promptUser().ext?.[ext.id] ?? personaData().ext?.[ext.id]) : subject.template?.ext?.[ext.id];
             if (!data && !ext.sceneXmlAlways) continue;
@@ -62,9 +62,8 @@ function buildUserBlock() {
     if (s.personaInUser) { const d = personaDescription().trim(); if (d) inner.push(`<description>${xt(d)}</description>`); }
     if (s.trackUser && present) {
         const u = promptUser();
-        const p = personaData();
         if (u.posture) inner.push(`<state posture="${xa(u.posture)}"/>`);
-        inner.push(...outfitXml(u.outfit, p.wardrobe, !!u.dressed));
+        inner.push(...outfitXml(u.outfit, !!u.dressed));
     }
     inner.push(...extXml({ kind: 'user', name: c.name1, subject: personaData(), user: promptUser() }));
     if (!inner.length) return '';
@@ -114,7 +113,7 @@ function buildCharBlock(inst) {
     ].filter(Boolean).join(' ');
     if (stAttrs) inner.push(`<state ${stAttrs}/>`);
     if (inst.feelings) inner.push(`<feelings>${xt(inst.feelings)}</feelings>`);
-    inner.push(...outfitXml(inst.outfit, t?.wardrobe, !!inst.dressed));
+    inner.push(...outfitXml(inst.outfit, !!inst.dressed));
     inner.push(...extXml({ kind: 'char', name, id: inst.id, template: t, instance: inst }));
     // Root fields (API 12) are attributes of <char>, before / after name and id.
     const rootAttrs = attrsWithFields([{ key: 'name', text: ` name="${xa(name)}"` }, { key: 'id', text: ` id="${xa(inst.id)}"` }], t, 'root');

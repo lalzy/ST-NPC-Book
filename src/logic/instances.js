@@ -15,22 +15,16 @@ import { startingOutfit } from './outfit.js';
  * Template-only fields, not copied into an instance: library bookkeeping, and the starting outfit
  * (it becomes the instance's current outfit once; after that the instance only has what it wears now).
  */
-export const TEMPLATE_ONLY_KEYS = ['folder', 'auto', 'created', 'updated', 'defaultWorn'];
+export const TEMPLATE_ONLY_KEYS = ['folder', 'auto', 'created', 'updated'];
 
 export function emptyScene() { return { instances: {}, active: [] }; }
 
-/** True when a value is a scene object (not a legacy roster array). */
+/** True when a value is a scene object. */
 export function isScene(x) { return !!x && typeof x === 'object' && !Array.isArray(x) && x.instances && typeof x.instances === 'object' && Array.isArray(x.active); }
 
-/** Any stored scene value → scene. Legacy roster arrays become a scene whose instances are the listed (active) entries. */
+/** Any stored scene value → scene (anything else: an empty scene). */
 export function toScene(x) {
-    if (isScene(x)) return x;
-    if (Array.isArray(x)) {
-        const instances = {};
-        for (const i of x) if (i?.id) instances[i.id] = i;
-        return { instances, active: x.filter(i => i?.id).map(i => i.id) };
-    }
-    return emptyScene();
+    return isScene(x) ? x : emptyScene();
 }
 
 export function cloneScene(x) { return JSON.parse(JSON.stringify(toScene(x))); }
@@ -48,7 +42,7 @@ export function activeInstances(scene) {
 export function instanceFromTemplate(template, { postures = [], states = [], conditions = ['Worn'], onCreate = null } = {}) {
     const card = JSON.parse(JSON.stringify(template));
     for (const k of TEMPLATE_ONLY_KEYS) delete card[k];
-    const outfit = startingOutfit(template, conditions);
+    const outfit = startingOutfit(template);
     const inst = {
         ...card,
         instanceOf: template.id,
@@ -101,7 +95,6 @@ export const SYNC_GROUPS = [
     { key: 'dialogue', label: 'Dialogue examples', fields: ['dialogue'] },
     { key: 'traits', label: 'Identity', fields: ['traits'] },
     { key: 'profile', label: 'Profile (height, pronouns, sexuality, experience)', fields: ['height', 'pronouns', 'sexuality', 'sexualExperience'] },
-    { key: 'wardrobe', label: 'Wardrobe', fields: ['wardrobe'] },
 ];
 
 /** Empty values ('' / [] / {} / null / missing) count as the same thing. */
@@ -147,35 +140,19 @@ export function templateFingerprints(template) {
 
 /**
  * Sync groups where the template changed since the instance was made or last synced.
- * A group missing from the fingerprint was empty on the template then. Instances made before fingerprints existed
- * have none: for them the template is compared with the instance's own value.
+ * A group missing from the fingerprint was empty on the template then.
  */
 export function templateChanges(inst, template) {
     if (!inst || !template) return [];
-    const seen = inst.templateSync;
+    const seen = inst.templateSync || {};
     const keys = new Set([...syncKeys(template), ...Object.keys(seen || {}).filter(k => k.startsWith('ext:'))]);
     const out = [];
     for (const k of keys) {
         const now = hashOf(groupValue(template, k));
-        const before = seen ? (seen[k] ?? hashOf(undefined)) : hashOf(groupValue(inst, k));
+        const before = seen[k] ?? hashOf(undefined);
         if (now !== before) out.push(k);
     }
     return out;
-}
-
-/**
- * Give an instance made before fingerprints existed its fingerprint (mutates it): groups that match the template now
- * are recorded as seen, groups that differ stay changed. Call before editing such an instance's card fields,
- * so the edit is not taken for a template change. Instances that have a fingerprint are left as they are.
- */
-export function ensureSyncBaseline(inst, template) {
-    if (!inst || !template || inst.templateSync) return inst;
-    const changed = new Set(templateChanges(inst, template));
-    const fp = templateFingerprints(template);
-    const sync = {};
-    for (const [k, h] of Object.entries(fp)) sync[k] = changed.has(k) ? hashOf(groupValue(inst, k)) : h;
-    inst.templateSync = sync;
-    return inst;
 }
 
 /**
@@ -184,7 +161,6 @@ export function ensureSyncBaseline(inst, template) {
  */
 export function syncFromTemplate(inst, template, keys, reviewed = keys) {
     if (!inst || !template) return inst;
-    ensureSyncBaseline(inst, template);
     for (const k of keys || []) {
         if (k.startsWith('ext:')) {
             const id = k.slice(4);

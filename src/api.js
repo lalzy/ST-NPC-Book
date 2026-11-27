@@ -194,16 +194,15 @@ export function exposePublicApi() {
             return clone(f ? fieldValue(card, f) : sourceValue(card, name));
         },
         /**
-         * Who is in the current scene: [{ id, name, instance, template }] plus your persona's name.
-         * `instance` is the chat's own copy (card fields, wardrobe, ext data, live state). `template` is the same object,
-         * kept for extensions written before instancing: inside a chat, an NPC's data always comes from its instance.
+         * Who is in the current scene: [{ id, name, instance }] plus your persona's name.
+         * `instance` is the chat's own copy (card fields, ext data, live state): inside a chat, an NPC's data always comes from it.
          */
         getScene: () => ({
-            roster: hasChat() ? currentRoster().map(i => ({ id: i.id, name: i.name ?? i.id, instance: i, template: i })) : [],
+            roster: hasChat() ? currentRoster().map(i => ({ id: i.id, name: i.name ?? i.id, instance: i })) : [],
             userName: ctx().name1,
         }),
-        /** Who was in the scene at a chat message (for the last message: before + after it): [{ id, name, instance, template }]. */
-        getRosterAt: (idx) => (hasChat() ? rosterAtMessage(Number(idx)) : []).map(i => ({ id: i.id, name: i.name ?? i.id, instance: i, template: i })),
+        /** Who was in the scene at a chat message (for the last message: before + after it): [{ id, name, instance }]. */
+        getRosterAt: (idx) => (hasChat() ? rosterAtMessage(Number(idx)) : []).map(i => ({ id: i.id, name: i.name ?? i.id, instance: i })),
         /** The open chat's instance of an NPC (active or not), or null. */
         getInstance: (ref) => (hasChat() ? findInstance(ref) : null),
         /** Resolve an id or name (as written by the LLM in <npc id="…">): this chat's instance first, then the library. */

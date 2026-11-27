@@ -15,7 +15,7 @@ function replaceWord(text, from, to) {
 }
 
 /**
- * Point speaker blocks at the real ids: <npc id="generated"> / <npc id="aldric"> → <npc id="gandalf">.
+ * Point speaker blocks at the real ids: <npc id="to_be_allocated"> / <npc id="aldric"> → <npc id="gandalf">.
  * `idMap`: { writtenId: finalId }. Ids are compared case-insensitively.
  */
 export function remapSpeakerIds(text, idMap) {

@@ -196,7 +196,7 @@ The Wardrobe extension is the full example: its catalog is the character's wardr
 |---|---|
 | `apiVersion` / `version` | `13`. |
 | `registerExtension(def)` / `unregisterExtension(id)` | See section 3. |
-| `getScene()` | `{ roster: [{ id, name, instance, template }], userName }`: who is in the scene now (`template` equals `instance`; it is kept for older extensions). |
+| `getScene()` | `{ roster: [{ id, name, instance }], userName }`: who is in the scene now. |
 | `getRosterAt(messageIndex)` | Who was in the scene at a chat message. |
 | `getInstance(ref)` | This chat's instance of an NPC (by id or name), active or not, or `null`. |
 | `resolveNpc(ref)` | Id for an id or name (such as an `<npc id="…">` the AI wrote): the chat's instances first, then the library. |

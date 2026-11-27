@@ -50,7 +50,7 @@ export function openUserEditor(anchor) {
         writeCurrentScene(null, setUserInScene(!u.absent));
         showWhere();
     });
-    let draft = resolveOutfit(u.outfit, personaData().wardrobe || []);
+    let draft = resolveOutfit(u.outfit);
     mountPaperdoll(pop.find('.npcb-doll-host'), () => draft, (o) => { draft = o; }, () => {
         const p = personaData();
         const cat = outfitCatalog({ source: 'editor', kind: 'user', id: 'user', subject: p, ext: { ...(p.ext || {}), ...(u.ext || {}) } });

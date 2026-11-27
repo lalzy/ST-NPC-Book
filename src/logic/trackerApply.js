@@ -8,8 +8,8 @@ import { PROFILE_TRAIT_KEYS, profileFromEntry } from './profile.js';
 import { cleanId, normalize, pickEnum, uniqueId } from './text.js';
 import { closestEnum } from './enumMatch.js';
 
-/** The placeholder id the LLM gives a new character ("to_be_allocated", "to_be_allocated_2", …; older: "generated"): replaced with the real id. */
-export function isTempId(id) { return /^(?:to_be_allocated|generated)(?:[_-]?\d+)?$/.test(String(id ?? '').trim().toLowerCase()); }
+/** The placeholder id the LLM gives a new character ("to_be_allocated", "to_be_allocated_2", …): replaced with the real id. */
+export function isTempId(id) { return /^to_be_allocated(?:[_-]?\d+)?$/.test(String(id ?? '').trim().toLowerCase()); }
 
 function titleFromId(id) { return String(id).replace(/[_-]+/g, ' ').replace(/\b[a-z]/g, c => c.toUpperCase()).trim(); }
 
@@ -139,7 +139,7 @@ export function applyTracker(list, prevScene, { library, threshold, numericToler
             if (!wasActive) log.push({ name: inst.name, action: hadInstance ? 'returned' : 'arrived', id, reason, score });
             else log.push({ name: inst.name, action: 'changed', id });
             const cat = typeof catalogFor === 'function' ? (catalogFor(inst) || {}) : {};
-            const oc = applyOutfitChange(resolveOutfit(inst.outfit, inst.wardrobe || []), normOutfitChange(entry), { conditions, catalog: cat.items || [], strict: !!cat.strict });
+            const oc = applyOutfitChange(resolveOutfit(inst.outfit), normOutfitChange(entry), { conditions, catalog: cat.items || [], strict: !!cat.strict });
             inst.outfit = oc.outfit;
             if (normOutfitChange(entry)) inst.dressed = true; // clothing was set (even to nothing): always report it
             if (oc.created.length) log.push({ name: inst.name, action: 'clothing-new', id, items: oc.created.map(x => x.name) });

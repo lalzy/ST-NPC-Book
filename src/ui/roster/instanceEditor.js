@@ -62,7 +62,7 @@ export function openInstanceEditor(id, anchor) {
         e.stopPropagation();
         openInstancePortraitMenuFor(id, e.currentTarget); // the menu opens beside it; this popover stays open
     });
-    const outfit0 = resolveOutfit(inst.outfit, inst.wardrobe || []);
+    const outfit0 = resolveOutfit(inst.outfit);
     let draftOutfit = clone(outfit0);
     // Known clothing from sister extensions (e.g. a wardrobe). Its "Edit" action opens their sheet, so close this first.
     const catalog = () => {
@@ -94,7 +94,6 @@ export function openInstanceEditor(id, anchor) {
         const scene = cloneScene(currentScene());
         const target = scene.instances[id];
         if (target) {
-            delete target.defaultWorn; // instances have no starting outfit (older instances may still carry one)
             if (JSON.stringify(draftOutfit) !== JSON.stringify(outfit0)) target.dressed = true;
             target.outfit = draftOutfit;
             target.posture = String(pop.find('.npcb-i-posture').val() ?? '');

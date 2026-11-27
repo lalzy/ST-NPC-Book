@@ -19,10 +19,9 @@ export async function openPersonaCharacter(tab = 'outfit') {
     const c = ctx();
     const p = personaData();
     p.ext = p.ext || {};
-    const draft = clone({ outfit: startingOutfit(p, settings().conditions), ext: p.ext });
+    const draft = clone({ outfit: startingOutfit(p), ext: p.ext });
     const extTabs = [...extensions.values()].filter(x => x.personaSheet);
     for (const x of extTabs) if (!draft.ext[x.id]) draft.ext[x.id] = typeof x.defaultData === 'function' ? x.defaultData() : {};
-    if (tab === 'wardrobe' && extensions.get('wardrobe')?.personaSheet) tab = 'ext:wardrobe'; // the wardrobe moved to a sister extension
     if (!tab.startsWith('ext:') || !extTabs.some(x => `ext:${x.id}` === tab)) tab = 'outfit';
     const ava = personaKey() ? `<img class="npcb-ava npcb-ava-md" src="${esc(getUserAvatar(personaKey()))}">` : avatarHtml(null, c.name1, 'npcb-ava-md');
     const box = $(`<div class="npcb-persona-char">
@@ -49,14 +48,13 @@ export async function openPersonaCharacter(tab = 'outfit') {
     const ok = await c.callGenericPopup(box, c.POPUP_TYPE.CONFIRM, '', { wide: true, large: true, allowVerticalScrolling: true, okButton: 'Save', cancelButton: 'Cancel' });
     if (!ok) return;
     p.outfit = draft.outfit;
-    delete p.defaultWorn; // older data: the starting outfit was starred wardrobe items
     p.ext = draft.ext;
     save();
     for (const x of extTabs) sheetSaved(x, 'personaSheet', { id: 'user', scope: 'persona', data: p.ext[x.id] });
     if (hasChat()) {
         // Someone wearing nothing (never dressed in this chat) puts on the new starting outfit.
         const u = currentUser();
-        const worn = resolveOutfit(u.outfit, p.wardrobe || []);
+        const worn = resolveOutfit(u.outfit);
         if (!worn.length && !u.dressed && p.outfit.length) writeCurrentScene(null, { ...u, outfit: clone(p.outfit), dressed: true });
     }
     updateAutoInjection();

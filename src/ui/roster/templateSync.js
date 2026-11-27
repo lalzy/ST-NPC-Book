@@ -29,7 +29,7 @@ export function syncGroupLabel(key) {
 }
 
 // Card text fields are ticked by default; portrait and extension data (often this chat's own state) are not.
-const TICKED = new Set(['name', 'color', 'description', 'details', 'dialogue', 'traits', 'profile', 'wardrobe']);
+const TICKED = new Set(['name', 'color', 'description', 'details', 'dialogue', 'traits', 'profile']);
 
 /** Dialog: pick which changed template fields to pull into this chat's instance. Resolves true when synced. */
 export async function openTemplateSync(id) {

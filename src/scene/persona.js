@@ -13,14 +13,12 @@ export function personaData(key = personaKey()) {
     const s = settings();
     if (!s.personas[key]) s.personas[key] = { outfit: [] };
     const p = s.personas[key];
-    // Older data: a starting outfit as starred wardrobe items (`wardrobe` + `defaultWorn`) becomes self-contained items.
-    if (!Array.isArray(p.outfit)) p.outfit = startingOutfit(p, s.conditions);
     return p;
 }
 function freshUser(prev) {
     const s = settings();
     const p = personaData();
-    const outfit = startingOutfit(p, s.conditions);
+    const outfit = startingOutfit(p);
     return { persona: personaKey(), posture: prev?.posture ?? s.postures[0] ?? '', outfit, dressed: outfit.length > 0, absent: !!prev?.absent };
 }
 /**

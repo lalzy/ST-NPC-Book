@@ -121,7 +121,7 @@ function applyIntroCast(entries, carried, user, notes) {
                 delete e.overrides[sceneKey];
             }
             const p = personaData();
-            const worn = resolveOutfit(u.outfit, p.wardrobe || []);
+            const worn = resolveOutfit(u.outfit);
             const cat = outfitCatalog({ source: 'greeting', kind: 'user', id: 'user', subject: p, ext: { ...(p.ext || {}), ...(u.ext || {}) } });
             const r = applyCastOverrides({ posture: u.posture, outfit: worn }, e.overrides, { ...opts, catalog: cat.items, strict: cat.strict });
             const outfitChanged = JSON.stringify(r.instance.outfit) !== JSON.stringify(worn);
@@ -136,7 +136,7 @@ function applyIntroCast(entries, carried, user, notes) {
         const inst = id ? attachInstance(scene, id, allTemplates(), instanceOpts()) : null;
         if (!inst) { notes.missing.add(e.ref); continue; }
         const cat = outfitCatalog({ source: 'greeting', kind: 'char', id: inst.id, subject: inst, ext: inst.ext || {} });
-        const r = applyCastOverrides({ ...inst, outfit: resolveOutfit(inst.outfit, inst.wardrobe || []) }, e.overrides, { ...opts, catalog: cat.items, strict: cat.strict });
+        const r = applyCastOverrides({ ...inst, outfit: resolveOutfit(inst.outfit) }, e.overrides, { ...opts, catalog: cat.items, strict: cat.strict });
         if (JSON.stringify(r.instance.outfit) !== JSON.stringify(inst.outfit)) r.instance.dressed = true;
         Object.assign(inst, r.instance);
         r.warnings.forEach(w => notes.warnings.add(`${inst.name}: ${w}`));

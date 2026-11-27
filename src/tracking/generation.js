@@ -85,7 +85,7 @@ function rewriteReply(text, list, ids, choices, lookups, scene) {
     }
     // One new character this reply: a bare placeholder in a speaker tag can only mean them.
     const fresh = list.map((e, i) => (e && typeof e === 'object' && (isTempId(cleanId(e.id)) || (!e.id && e.new)) ? ids[i] : null)).filter(Boolean);
-    if (fresh.length === 1) for (const k of ['to_be_allocated', 'generated']) if (!idMap[k]) idMap[k] = fresh[0];
+    if (fresh.length === 1 && !idMap.to_be_allocated) idMap.to_be_allocated = fresh[0];
     let out = remapSpeakerIds(text, idMap);
     for (const [from, to] of renames) out = renameInText(out, from, to);
     return out;
@@ -208,7 +208,7 @@ export async function processLastMessage() {
                     u.posture = closestEnum(userEntry.posture, s.postures, u.posture);
                     if (s.trackOutfits) {
                         const cat = outfitCatalog({ source: 'tracker', kind: 'user', id: 'user', subject: p, ext: { ...(p.ext || {}), ...(u.ext || {}) } });
-                        const oc = applyOutfitChange(resolveOutfit(u.outfit, p.wardrobe || []), normOutfitChange(userEntry), { conditions: s.conditions, catalog: cat.items, strict: cat.strict });
+                        const oc = applyOutfitChange(resolveOutfit(u.outfit), normOutfitChange(userEntry), { conditions: s.conditions, catalog: cat.items, strict: cat.strict });
                         u.outfit = oc.outfit;
                         if (userEntry.outfit || userEntry.wear) u.dressed = true;
                     }
