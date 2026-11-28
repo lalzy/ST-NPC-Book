@@ -13,6 +13,11 @@ import { avatarHtml } from '../avatar.js';
 import { openPersonaCharacter } from '../persona/personaCharacter.js';
 import { closePopovers, placePopover } from '../popover.js';
 import { mountPaperdoll } from '../wardrobe/paperdoll.js';
+import { bindTabs } from '../tabs.js';
+import { sheetSaved } from '../../core/extHooks.js';
+import { save } from '../../core/settings.js';
+import { renderRoster } from './rosterBar.js';
+import { draftOf, renderSceneTabs, sceneTabByKey, sceneTabExtensions, sceneTabsHtml } from './sceneTabs.js';
 
 export function openUserEditor(anchor) {
     closePopovers();
@@ -25,11 +30,21 @@ export function openUserEditor(anchor) {
         return all.map(x => `<option value="${esc(x)}" ${x === cur ? 'selected' : ''}>${esc(x)}</option>`).join('');
     };
     const ava = personaKey() ? `<img class="npcb-ava npcb-ava-md" src="${esc(getUserAvatar(personaKey()))}">` : avatarHtml(null, c.name1, 'npcb-ava-md');
+    // Extra tabs (sceneTabs, API 14): your persona data of each extension, saved with Save
+    const sceneExt = sceneTabExtensions('user');
+    const drafts = {};
+    for (const { x } of sceneExt) drafts[x.id] = draftOf(x, personaData().ext?.[x.id]);
+    const st = sceneTabsHtml(sceneExt);
+    const tabbed = sceneExt.length > 0;
     const pop = $(`<div class="npcb-popover npcb-inst">
         <div class="npcb-inst-head"><div class="npcb-u-ava">${ava}</div><div><b>${esc(c.name1)}</b><br><small class="npcb-dim npcb-u-where"></small></div></div>
+        ${tabbed ? `<div class="npcb-tabs"><div class="npcb-tab active" data-tab="state">State</div>${st.heads}</div>` : ''}
+        <div class="npcb-tabpane" data-pane="state">
         <div class="menu_button npcb-u-scene" style="width:auto; white-space:nowrap;"></div>
         <label>Current posture<select class="text_pole npcb-u-posture">${opts(s.postures, u.posture)}</select></label>
         <div class="npcb-doll-host"></div>
+        </div>
+        ${st.panes}
         <div class="npcb-row"><div class="menu_button npcb-u-save"><i class="fa-solid fa-check"></i> Save</div>
         ${[...extensions.values()].filter(x => x.personaSheet).map(x => `<div class="menu_button npcb-u-ext" data-ext="${esc(x.id)}"><i class="fa-solid ${esc(x.personaSheet.icon || 'fa-table-list')}"></i> ${esc(x.personaSheet.label || x.id)}</div>`).join('')}</div>
     </div>`);
@@ -56,8 +71,25 @@ export function openUserEditor(anchor) {
         const cat = outfitCatalog({ source: 'editor', kind: 'user', id: 'user', subject: p, ext: { ...(p.ext || {}), ...(u.ext || {}) } });
         return { ...cat, actions: cat.actions.map(a => ({ ...a, run: () => { closePopovers(); if (a.run) a.run({ kind: 'user', id: 'user', scope: 'persona' }); else openPersonaCharacter(`ext:${a.extId}`); } })) };
     });
+    if (tabbed) {
+        bindTabs(pop);
+        renderSceneTabs(pop, sceneExt, drafts, () => ({ kind: 'user', id: 'user', name: c.name1, scope: 'persona', subject: personaData() }));
+        pop.on('click', '.npcb-tab', (e) => {
+            const wide = !!sceneTabByKey(String($(e.currentTarget).data('tab')))?.wide;
+            pop.toggleClass('npcb-inst-wide', wide).css('width', wide ? 'min(760px, 96vw)' : '');
+            placePopover(pop, anchor);
+        });
+    }
     pop.on('click', '.npcb-u-save', () => {
         writeCurrentScene(null, { ...u, posture: String(pop.find('.npcb-u-posture').val() ?? ''), outfit: draft, dressed: true });
+        if (sceneExt.length) {
+            // scene tabs edit your persona data (as the persona sheet does)
+            const p = personaData();
+            p.ext = { ...(p.ext || {}), ...clone(drafts) };
+            save();
+            renderRoster();
+            for (const { x } of sceneExt) sheetSaved(x, 'personaSheet', { id: 'user', scope: 'persona', data: drafts[x.id] });
+        }
         closePopovers();
     });
     placePopover(pop, anchor);

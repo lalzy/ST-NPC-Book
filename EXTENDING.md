@@ -50,7 +50,7 @@ if (window.NPCBook) register(window.NPCBook);
 else document.addEventListener('npcbook:ready', e => register(e.detail), { once: true });
 ```
 
-Check `api.apiVersion` (currently **13**) if you rely on something newer than the version that introduced it (listed in section 9).
+Check `api.apiVersion` (currently **14**) if you rely on something newer than the version that introduced it (listed in section 9).
 
 ---
 
@@ -95,6 +95,7 @@ Every hook is called inside a try/catch. A hook that throws is logged to the con
 | `chatTab: true` or `{ label?, icon?, wide?, render? }` | Needs `cardTab`. Shows your sheet as a **tab** in a chat NPC's scene-bar popover (next to State and Outfit) instead of a separate sheet button. | `render` defaults to `cardTab.render`, with the same `ctx` (`scope: 'instance'`). `data` is a draft saved by the popover's Save, then `cardTab.onSave({ id, scope: 'instance', data })` runs. `wide: true` widens the popover while your tab is open. `label` defaults to `cardTab.label`. If your `outfitCatalog` has an `editLabel`, its button on the Outfit tab switches to your tab. |
 | `personaSheet: { label, icon?, render(host, ctx), onSave?(info) }` | As a tab in the persona window (Persona Management → NPC Book), and as a button in your own scene-bar popover. | `ctx`: `{ data, kind: 'user', name, id: 'user', scope: 'persona', subject }` (`subject` is the stored persona data). Saved to the `persona` scope. |
 | `sheetLabel` | string | Label of the sheet button in an NPC's scene-bar popover (only when there is no `chatTab`). Default: `"<cardTab.label> sheet"`. |
+| `sceneTabs: [{ id, label, icon?, kinds?, wide?, render(host, ctx) }]` | (API 14) Extra **tabs on the scene cards**: the popover a character in the scene bar opens, for an NPC (next to State and Outfit) and for you (your own card gets a tab bar: State, then these). Any number per extension; works with or without `cardTab` / `chatTab`. | `kinds`: `['char']` (NPC cards), `['user']` (your card) or both (default). `ctx`: on an NPC card `{ data, template, instance, isNew: false, kind: 'char', id, scope: 'instance', tab }`; on your card `{ data, kind: 'user', id: 'user', name, scope: 'persona', subject, tab }`. `data` is a draft of your data for that character (the instance's, or your persona's; `defaultData()` when there is none), shared with your other tabs on that card and with your `chatTab`. The card's Save stores it, then `cardTab.onSave({ id, scope: 'instance', data })` (NPC) or `personaSheet.onSave({ id: 'user', scope: 'persona', data })` (you) runs. `wide: true` widens the popover while the tab is open. |
 | `sceneSide(instance)` | Each time the scene bar is drawn, for every character in the scene (API 10). | Return `'enemy'` to show them on the right of the scene bar (after a divider), `'friendly'` for the left, or `undefined` to leave it to others. Without an answer, an instance whose card has `enemy: true` (or `kind: 'enemy'`) is an enemy. The bar only splits while an enemy is present. |
 | `sceneButton: { icon, title, active?, onClick(anchorEl) }` | An icon in the scene bar head. | `icon` and `title` are strings or functions returning them (`icon` is a Font Awesome class, such as `'fa-dice-d20'`). `active() === false` dims it. Call `NPCBook.refreshScene()` after changing what it shows. |
 
@@ -194,7 +195,7 @@ The Wardrobe extension is the full example: its catalog is the character's wardr
 
 | Member | Description |
 |---|---|
-| `apiVersion` / `version` | `13`. |
+| `apiVersion` / `version` | `14`. |
 | `registerExtension(def)` / `unregisterExtension(id)` | See section 3. |
 | `getScene()` | `{ roster: [{ id, name, instance }], userName }`: who is in the scene now. |
 | `getRosterAt(messageIndex)` | Who was in the scene at a chat message. |
@@ -259,6 +260,21 @@ Listen on `document`:
 
 **Per-chat copies that remember where they started.** Use `onInstanceCreate` (see the Relationships extension, which marks what changed in this chat).
 
+**Add a tab to the scene cards (NPCs and you).** Use `sceneTabs`. NPC Book - Character Sheet adds its Equipment tab (what is in which hand) this way:
+```js
+api.registerExtension({
+    id: 'my-sheet', label: 'My sheet', defaultData: () => ({ held: { primary: '', off: '' } }),
+    sceneTabs: [{
+        id: 'equipment', label: 'Equipment', icon: 'fa-hand-fist', kinds: ['char', 'user'],
+        render(host, ctx) {
+            // ctx.data is the draft for this character (NPC instance or your persona): change it, the card's Save stores it
+            host.html(`<label>Primary hand <input class="text_pole" value="${ctx.data.held.primary}"></label>`);
+            host.find('input').on('input', (e) => { ctx.data.held.primary = e.target.value; });
+        },
+    }],
+});
+```
+
 **Link two characters.** Use `cardTab.onSave` to update the other one with `setExtData` (see the Relationships extension's "both directions").
 
 ---
@@ -295,3 +311,4 @@ Listen on `document`:
 | 11 | `markDead(id)`; tracker entries with `"dead": true` remove the character from the scene for good (instance kept, marked dead). |
 | 12 | `fields`: values placed in a card's root / Identity / Profile section, with position, type and prompt-return name; `getFields()`. |
 | 13 | `sections` (new card sections, own prompt element), derived fields (`dependsOn` + `derive`), `getSections()`, `getFieldValue()`. |
+| 14 | `sceneTabs`: extra tabs on the scene cards, for NPCs and for your own card. |

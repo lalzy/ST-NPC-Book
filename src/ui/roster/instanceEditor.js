@@ -15,6 +15,7 @@ import { mountPaperdoll } from '../wardrobe/paperdoll.js';
 import { openInstanceCard } from './instanceCard.js';
 import { openInstanceExtSheet } from './instanceExtSheet.js';
 import { openTemplateSync, pendingTemplateChanges, syncGroupLabel } from './templateSync.js';
+import { draftOf, renderSceneTabs, sceneTabByKey, sceneTabExtensions, sceneTabsHtml } from './sceneTabs.js';
 
 export function openInstanceEditor(id, anchor) {
     closePopovers();
@@ -34,11 +35,16 @@ export function openInstanceEditor(id, anchor) {
     const chatTabOf = (x) => (x.chatTab === true ? {} : x.chatTab);
     const draftExt = {};
     for (const x of extTabs) draftExt[x.id] = clone(inst.ext?.[x.id] ?? (typeof x.defaultData === 'function' ? x.defaultData() : {}));
+    // Extra tabs (sceneTabs, API 14): they share the extension's draft with its chatTab, and are saved with it
+    const sceneExt = sceneTabExtensions('char');
+    for (const { x } of sceneExt) if (draftExt[x.id] === undefined) draftExt[x.id] = draftOf(x, inst.ext?.[x.id]);
+    const savedExt = [...new Set([...extTabs, ...sceneExt.map(e => e.x)])];
+    const st = sceneTabsHtml(sceneExt);
     const pop = $(`<div class="npcb-popover npcb-inst" data-npcb-inst="${esc(id)}">
         <div class="npcb-inst-head">${avatarHtml(t, name, 'npcb-ava-md')}
             <div><b>${esc(name)}</b><br><small class="npcb-dim">${esc(id)}</small></div>
         </div>
-        <div class="npcb-tabs"><div class="npcb-tab active" data-tab="state">State</div><div class="npcb-tab" data-tab="outfit">Outfit</div>${extTabs.map(x => `<div class="npcb-tab" data-tab="ext:${esc(x.id)}">${esc(chatTabOf(x).label || x.cardTab.label || x.id)}</div>`).join('')}</div>
+        <div class="npcb-tabs"><div class="npcb-tab active" data-tab="state">State</div><div class="npcb-tab" data-tab="outfit">Outfit</div>${extTabs.map(x => `<div class="npcb-tab" data-tab="ext:${esc(x.id)}">${esc(chatTabOf(x).label || x.cardTab.label || x.id)}</div>`).join('')}${st.heads}</div>
         <div class="npcb-tabpane" data-pane="state">
         <label>Current posture<select class="text_pole npcb-i-posture">${opts(s.postures, inst.posture)}</select></label>
         <label>Current state<select class="text_pole npcb-i-state">${opts(s.states, inst.state)}</select></label>
@@ -46,6 +52,7 @@ export function openInstanceEditor(id, anchor) {
         </div>
         <div class="npcb-tabpane" data-pane="outfit" style="display:none"><div class="npcb-doll-host"></div></div>
         ${extTabs.map(x => `<div class="npcb-tabpane" data-pane="ext:${esc(x.id)}" style="display:none"><div class="npcb-ext-host" data-ext="${esc(x.id)}"></div></div>`).join('')}
+        ${st.panes}
         <div class="npcb-row">
             <div class="menu_button npcb-i-save"><i class="fa-solid fa-check"></i> Save</div>
             <div class="menu_button npcb-i-card" title="This chat's own copy of the card"><i class="fa-solid fa-id-card"></i> Card</div>
@@ -81,12 +88,13 @@ export function openInstanceEditor(id, anchor) {
         const render = chatTabOf(x).render || x.cardTab.render;
         try { render(host, { data: draftExt[x.id], template: inst, instance: inst, isNew: false, kind: 'char', id, scope: 'instance' }); } catch (e) { console.error(`[NPC Book] ${x.id} chat tab failed`, e); host.text(`Error: ${e.message}`); }
     }
+    renderSceneTabs(pop, sceneExt, draftExt, () => ({ template: inst, instance: inst, isNew: false, kind: 'char', id, scope: 'instance' }));
     pop.on('click', '.npcb-tab', (e) => {
         const tab = String($(e.currentTarget).data('tab'));
         if (tab === 'outfit') doll.refresh(); // shows wardrobe edits made on another tab
         // Extension tabs may ask for room (chatTab.wide): widen the popover while they are open.
         const x = tab.startsWith('ext:') ? extensions.get(tab.slice(4)) : null;
-        const wide = !!(x && chatTabOf(x).wide);
+        const wide = !!(x && chatTabOf(x).wide) || !!sceneTabByKey(tab)?.wide;
         pop.toggleClass('npcb-inst-wide', wide).css('width', wide ? 'min(760px, 96vw)' : '');
         placePopover(pop, anchor);
     });
@@ -99,9 +107,9 @@ export function openInstanceEditor(id, anchor) {
             target.posture = String(pop.find('.npcb-i-posture').val() ?? '');
             target.state = String(pop.find('.npcb-i-state').val() ?? '');
             target.feelings = String(pop.find('.npcb-i-feelings').val() ?? '').trim();
-            if (extTabs.length) target.ext = { ...(target.ext || {}), ...clone(draftExt) };
+            if (savedExt.length) target.ext = { ...(target.ext || {}), ...clone(draftExt) };
             writeCurrentScene(scene);
-            for (const x of extTabs) sheetSaved(x, 'cardTab', { id, scope: 'instance', data: draftExt[x.id] });
+            for (const x of savedExt) sheetSaved(x, 'cardTab', { id, scope: 'instance', data: draftExt[x.id] });
         }
         closePopovers();
     });

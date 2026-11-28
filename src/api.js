@@ -40,8 +40,9 @@ import { bindTabs } from './ui/tabs.js';
  *  11 added markDead, and "dead": true in tracker entries (a dead character leaves the scene for good; its instance is kept, marked dead).
  *  12 added fields: values on every NPC card, placed in the card's root / Identity / Profile section, sent to and read from the LLM; getFields.
  *  13 added sections (new card sections next to Identity / Profile), derived fields (dependsOn + derive), getSections, getFieldValue.
+ *  14 added sceneTabs: extra tabs on the scene cards (an NPC's and your own popover in the scene bar).
  *  Full contract: EXTENDING.md. */
-export const API_VERSION = 13;
+export const API_VERSION = 14;
 
 /** Open an extension's sheet for one character in a popup. scope: 'instance' (this chat), 'template' (card), 'persona'. */
 function openSheet(ref, extId, { scope = 'instance' } = {}) {
